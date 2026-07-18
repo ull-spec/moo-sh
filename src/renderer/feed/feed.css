@@ -1,0 +1,386 @@
+/* feed.css
+ * Layout + component styling for the feed window. References theme.css
+ * custom properties for all colors/typography.
+ */
+
+html,
+body {
+  height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* --- header / status bar ------------------------------------------------ */
+
+#statusbar {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  font-size: calc(var(--font-size) - 1px);
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- find bar (Ctrl+F) ------------------------------------------------------ */
+
+.find-bar {
+  position: fixed;
+  top: 40px;
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.find-bar[hidden] {
+  display: none;
+}
+
+#find-input {
+  width: 180px;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: calc(var(--font-size) - 1px);
+  border: none;
+  outline: none;
+  padding: 4px 6px;
+}
+
+.find-count {
+  min-width: 60px;
+  color: var(--fg-muted);
+  font-size: calc(var(--font-size) - 2px);
+  white-space: nowrap;
+}
+
+.find-bar button {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: calc(var(--font-size) - 2px);
+  line-height: 1;
+}
+
+.find-bar button:hover {
+  color: var(--accent);
+}
+
+/* --- two-column layout ---------------------------------------------------- */
+
+#main {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  visibility: hidden;
+}
+
+body.layout-ready #main {
+  visibility: visible;
+}
+
+#left-col {
+  flex: 2 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+#right-col {
+  flex: 1 1 0;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* --- right-column panels (Pages / Channels) ------------------------------- */
+
+.panel {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel-title {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  border-bottom: 1px solid var(--border);
+  font-size: calc(var(--font-size) - 2px);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.panel-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  overflow-x: auto;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-right: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.tab:hover {
+  background: var(--bg);
+}
+
+.tab.active {
+  background: var(--bg);
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.tab.unread .tab-label {
+  color: var(--fg);
+  font-weight: bold;
+}
+
+.tab.unread .tab-label::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+.tab-close {
+  opacity: 0.5;
+}
+
+.tab-close:hover {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.panel-body {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.tab-view {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  padding: 6px 10px;
+  display: none;
+}
+
+.tab-view.active {
+  display: block;
+}
+
+.panel-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+  font-style: italic;
+  font-size: calc(var(--font-size) - 1px);
+}
+
+.panel-empty[hidden] {
+  display: none;
+}
+
+/* --- scrollback ---------------------------------------------------------- */
+
+#scrollback {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 6px 10px;
+}
+
+.line {
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.line.system {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+.link {
+  color: #ff69b4;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link:hover {
+  color: var(--accent);
+}
+
+/* --- inline image previews (main scrollback only) ------------------------- */
+
+.inline-image {
+  display: block;
+  max-width: min(100%, 480px);
+  max-height: 320px;
+  margin: 4px 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.inline-image:hover {
+  border-color: var(--accent);
+}
+
+.line-ts {
+  display: inline-block;
+  font-size: 0.8em;
+  opacity: 0.45;
+  margin-right: 6px;
+  user-select: none;
+}
+
+/* --- command echo log (local, meta) --------------------------------------- */
+
+#cmdlog {
+  flex: 0 0 auto;
+  display: block;
+  min-width: 0;
+  height: calc(var(--font-size) * var(--line-height) * 4);
+  min-height: calc(var(--font-size) * var(--line-height) * 2);
+  overflow: auto;
+  resize: vertical;
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
+  border-top: 1px solid var(--border);
+  padding: 4px 10px;
+}
+
+#cmdlog .line.system {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
+/* --- input row ------------------------------------------------------------ */
+
+#inputform {
+  flex: 0 0 auto;
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+#cmdline {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  border: none;
+  outline: none;
+  padding: 8px 10px;
+  field-sizing: content;
+  resize: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--line-height);
+  max-height: calc(var(--font-size) * var(--line-height) * 6);
+}
+
+#cmdline:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* --- hidden sound placeholder --------------------------------------------- */
+
+#sound-slot {
+  display: none;
+}
+
+/* --- scrollbar (webkit) ---------------------------------------------------- */
+
+#scrollback::-webkit-scrollbar {
+  width: 10px;
+}
+
+#scrollback::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+#scrollback::-webkit-scrollbar-thumb {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+#scrollback::-webkit-scrollbar-thumb:hover {
+  background: var(--border);
+}
+
+/* --- resizable layout gutters --------------------------------------------- */
+
+.col-gutter {
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.col-gutter:hover { background: var(--accent); }
+
+.panel-gutter {
+  flex: 0 0 6px;
+  cursor: row-resize;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.panel-gutter:hover { background: var(--accent); }
+
+body.resizing { user-select: none; }

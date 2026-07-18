@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'none'; connect-src 'none'">
+  <title>MOO-SH — Connect</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+  <link rel="stylesheet" href="connect.css">
+</head>
+<body>
+  <div id="connect">
+    <div id="left">
+      <div class="pane-title">Worlds</div>
+      <ul id="profile-list" aria-label="Worlds"></ul>
+    </div>
+    <div id="right">
+      <div class="pane-title">Connection</div>
+      <div id="detail">
+        <div id="existing-detail">
+          <div class="field">
+            <label for="hostport">Host</label>
+            <div id="hostport" class="readonly">—</div>
+          </div>
+          <div class="field">
+            <label for="character">Character</label>
+            <select id="character"></select>
+            <input id="new-name" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="New character name" hidden>
+          </div>
+          <div class="field">
+            <label for="login">Login / connect string</label>
+            <input id="login" type="password" autocomplete="off" spellcheck="false"
+                   placeholder="e.g. connect &lt;character&gt; &lt;password&gt;">
+            <div class="hint">Stored locally only (gitignored). Never echoed to the feed or capture log.</div>
+          </div>
+        </div>
+        <div id="new-world" hidden>
+          <div class="field">
+            <label for="nw-name">Name</label>
+            <input id="nw-name" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="e.g. My New MUSH">
+          </div>
+          <div class="field">
+            <label for="nw-host">Host</label>
+            <input id="nw-host" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="e.g. mush.example.net">
+          </div>
+          <div class="field">
+            <label for="nw-port">Port</label>
+            <input id="nw-port" type="number" min="1" max="65535" autocomplete="off"
+                   placeholder="e.g. 4201">
+          </div>
+          <div class="field">
+            <label for="nw-charset">Character encoding</label>
+            <select id="nw-charset">
+              <option value="utf8">utf8</option>
+              <option value="latin1">latin1</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="nw-tls"><input id="nw-tls" type="checkbox"> Use TLS (SSL)</label>
+          </div>
+          <div class="field" id="nw-tls-insecure-field" hidden>
+            <label for="nw-tls-insecure">
+              <input id="nw-tls-insecure" type="checkbox">
+              Allow self-signed / unverified certificate (insecure)
+            </label>
+          </div>
+          <div id="nw-error" class="hint error" hidden></div>
+          <div class="hint">A new profile is saved locally when you connect.</div>
+        </div>
+      </div>
+      <div id="connect-error" class="hint error" hidden></div>
+      <div id="buttons">
+        <button id="btn-connect" type="button" disabled>Connect</button>
+        <button id="btn-quit" type="button">Quit</button>
+      </div>
+    </div>
+  </div>
+  <script src="connect.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+appId: io.github.ull-spec.moosh
+productName: MOO-SH
+directories:
+  output: dist
+files:            # ship ONLY the app; profiles now live in userData, never bundle them
+  - "src/**/*"
+  - "assets/**/*"
+  - "package.json"
+win:
+  target: nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: assets/icon.png
+  category: Game
+  maintainer: ull-spec
+  synopsis: Cross-platform MU*/MUSH/MUD client
+deb: {}

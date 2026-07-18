@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src https: http:; media-src 'self'; connect-src 'none'">
+  <title>MOO-SH — Feed</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+  <link rel="stylesheet" href="feed.css">
+</head>
+<body>
+  <header id="statusbar">Not connected</header>
+  <div id="find-bar" class="find-bar" hidden>
+    <input id="find-input" type="text" placeholder="Find" autocomplete="off" spellcheck="false">
+    <span id="find-count" class="find-count"></span>
+    <button type="button" id="find-prev" title="Previous match (Shift+Enter)">&#9650;</button>
+    <button type="button" id="find-next" title="Next match (Enter)">&#9660;</button>
+    <button type="button" id="find-close" title="Close (Esc)">&#10005;</button>
+  </div>
+  <div id="main">
+    <div id="left-col">
+      <div id="scrollback"></div>
+      <div id="cmdlog"></div>
+      <form id="inputform">
+        <textarea id="cmdline" rows="1" autocomplete="off" spellcheck="false" autofocus></textarea>
+      </form>
+    </div>
+    <div class="col-gutter" id="col-gutter" role="separator" aria-orientation="vertical" tabindex="-1"></div>
+    <div id="right-col">
+      <section class="panel" id="pages-panel">
+        <div class="panel-title">Pages</div>
+        <div class="panel-tabs" id="pages-tabs"></div>
+        <div class="panel-body" id="pages-body">
+          <div class="panel-empty" id="pages-empty">No pages yet.</div>
+        </div>
+      </section>
+      <div class="panel-gutter" id="panel-gutter" role="separator" aria-orientation="horizontal" tabindex="-1"></div>
+      <section class="panel" id="channels-panel">
+        <div class="panel-title">Channels</div>
+        <div class="panel-tabs" id="channels-tabs"></div>
+        <div class="panel-body" id="channels-body">
+          <div class="panel-empty" id="channels-empty">No channels yet.</div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <audio id="sound-slot" style="display:none"></audio>
+  <script type="module" src="feed.js"></script>
+</body>
+</html>

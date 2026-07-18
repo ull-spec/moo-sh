@@ -1,0 +1,45 @@
+/* theme.css
+ * Palette + base reset layer for the MU* client renderer windows.
+ * Pure variables + resets only — component layout lives in each window's
+ * own CSS file (e.g. feed/feed.css), which reads these custom properties.
+ */
+
+:root {
+  /* Surfaces */
+  --bg: #12141a;
+  --bg-elevated: #1b1e27;
+
+  /* Text */
+  --fg: #e8e6e3;
+  --fg-muted: #7c8092;
+
+  /* Accent + structure */
+  --accent: #5fb3ff;
+  --border: #2a2e3a;
+  --input-bg: #1b1e27;
+
+  /* Type */
+  --font-mono: "JetBrains Mono", "DejaVu Sans Mono", Consolas, monospace;
+  --font-size: 14px;
+  --line-height: 1.45;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  line-height: var(--line-height);
+}

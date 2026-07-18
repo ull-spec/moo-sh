@@ -1,0 +1,32 @@
+{
+  "name": "moo-sh",
+  "version": "0.1.0",
+  "description": "Cross-platform Electron MU*/MUSH/MUD client with a Discord-like multi-window layout, ANSI rendering, optional TLS, and desktop + sound notifications.",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win",
+    "dist": "electron-builder --linux --win"
+  },
+  "keywords": [
+    "mush",
+    "mud",
+    "mu",
+    "telnet",
+    "electron",
+    "mux",
+    "client"
+  ],
+  "author": "ull-spec",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.7.3"
+  }
+}

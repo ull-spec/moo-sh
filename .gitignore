@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# ============================================================
+# PERSONAL / LOCAL-ONLY DATA — never public, never committed.
+# Real chat history, credentials, and captures live here. Runtime data
+# normally lives under app.getPath('userData'), outside this repo entirely,
+# but these patterns guard against any stray local copy under the repo dir.
+# ============================================================
+
+# Raw capture logs (mined offline to author routing regex; may contain private play)
+captures/
+
+# electron-store / runtime user data is under app.getPath('userData'), not the repo,
+# but ignore any stray local config just in case
+config/local/
+
+# Per-world connection profiles: contain live host/port and possibly a
+# login/password (autoLoginCommand). All profile JSON is local-only; no
+# example/template profiles are committed. Users create worlds in-app via
+# the Connect window's "+ New World..." entry.
+config/profiles/*.json
+
+# Persistent per-correspondent/per-channel chat history (real RP content,
+# same sensitivity tier as profile JSON above). Real path is under
+# app.getPath('userData')/personal-history/, these guard any stray local copy.
+config/personal-history/
+personal-history/
+
+# Build output (Phase 5 electron-builder)
+dist/
+out/
+
+# Logs and OS cruft
+*.log
+npm-debug.log*
+.DS_Store

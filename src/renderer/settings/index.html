@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'none'; connect-src 'none'">
+  <title>MOO-SH — Settings</title>
+  <link rel="stylesheet" href="../shared/theme.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="pane-title">Settings</div>
+  <div id="content">
+    <div class="field">
+      <label for="font-select">Monospace font</label>
+      <select id="font-select"></select>
+      <div class="hint">Curated monospace fonts only, to keep the feed's column alignment intact. If a font isn't installed, the client falls back to a default monospace.</div>
+    </div>
+    <div class="field">
+      <label>Interface colors</label>
+      <div class="color-grid">
+        <label class="color-row"><span>Background</span><input type="color" id="color-bg"></label>
+        <label class="color-row"><span>Panel Background</span><input type="color" id="color-bgElevated"></label>
+        <label class="color-row"><span>Text</span><input type="color" id="color-fg"></label>
+        <label class="color-row"><span>Muted Text</span><input type="color" id="color-fgMuted"></label>
+        <label class="color-row"><span>Accent</span><input type="color" id="color-accent"></label>
+        <label class="color-row"><span>Border</span><input type="color" id="color-border"></label>
+      </div>
+      <button id="btn-reset-colors" type="button">Reset colors</button>
+      <div class="hint">Interface chrome only. Message text colors are unaffected.</div>
+    </div>
+    <div class="field">
+      <label>Sound notifications</label>
+      <div class="sound-toggle-row">
+        <label class="sound-toggle"><input type="checkbox" id="sound-page"> <span>Page</span></label>
+        <label class="sound-toggle"><input type="checkbox" id="sound-channel"> <span>Channel</span></label>
+        <label class="sound-toggle"><input type="checkbox" id="sound-activity"> <span>Activity</span></label>
+      </div>
+      <div class="hint">Activity reuses the channel sound and fires on feed activity while the window is unfocused. Turning a category off silences that whole category, regardless of the per-name settings below.</div>
+
+      <div class="sound-subsection">
+        <label>Channels</label>
+        <div id="sound-channels-list" class="sound-list"></div>
+        <input id="sound-channels-add" type="text" autocomplete="off" spellcheck="false" placeholder="+ Add channel...">
+      </div>
+
+      <div class="sound-subsection">
+        <label>Pages</label>
+        <div id="sound-pages-list" class="sound-list"></div>
+        <input id="sound-pages-add" type="text" autocomplete="off" spellcheck="false" placeholder="+ Add contact...">
+      </div>
+    </div>
+  </div>
+  <div id="actions">
+    <button id="btn-cancel" type="button">Cancel</button>
+    <button id="btn-confirm" type="button" class="primary">Confirm</button>
+  </div>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>
