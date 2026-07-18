@@ -25,18 +25,27 @@
 
 // --- Channel messages ------------------------------------------------------
 // `[ChannelName] Someone says/poses ...` (PennMUSH/TinyMUSH/TinyMUX) or
-// `<ChannelName> Someone says/poses ...` (RhostMUSH). One pattern, two
-// alternatives sharing the same `channel` named group (supported: duplicate
-// named groups across alternation branches). The negative lookaheads keep the
-// rule from firing on `[-- divider --]` / `<-- divider -->` style separators
-// (`(?!N?-)`) and on bracketed/angled numbers like timestamps/counters `[10]`
-// (`(?!\d)`). The `^` anchor also keeps it off inline `[OOC Area]` room-header
-// text, which does not start at column 0. Verified against a real captured
-// log: matches the guest channel lines and nothing else.
+// `<ChannelName> Someone says/poses ...` (RhostMUSH). Two separate rules
+// rather than one alternation, each declaring its own `channel` named group
+// exactly once — reusing the same named group across alternation branches
+// works on recent V8 but silently fails to compile on older engines (e.g.
+// Node 20), which would make the rule compile to nothing and drop out of
+// routing without a loud error. Splitting into two rules is behaviorally
+// identical (the two bracket styles can never both match one line) and
+// portable everywhere. The negative lookaheads keep each rule from firing on
+// `[-- divider --]` / `<-- divider -->` style separators (`(?!N?-)`) and on
+// bracketed/angled numbers like timestamps/counters `[10]` (`(?!\d)`). The
+// `^` anchor also keeps it off inline `[OOC Area]` room-header text, which
+// does not start at column 0. Verified against a real captured log: matches
+// the guest channel lines and nothing else.
 const channelRules = [
   {
-    pattern:
-      '^(?:\\[(?!N?-)(?!\\d)(?<channel>[^\\]]+)\\]|<(?!N?-)(?!\\d)(?<channel>[^>]+)>)',
+    pattern: '^\\[(?!N?-)(?!\\d)(?<channel>[^\\]]+)\\]',
+    target: { role: 'channel', nameFrom: 'channel' },
+    notify: 'channel',
+  },
+  {
+    pattern: '^<(?!N?-)(?!\\d)(?<channel>[^>]+)>',
     target: { role: 'channel', nameFrom: 'channel' },
     notify: 'channel',
   },
