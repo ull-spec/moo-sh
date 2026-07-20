@@ -23,6 +23,14 @@
  *                numeric group index. This is how one channel rule serves every
  *                channel and one page rule serves every partner. If nameFrom is
  *                set but the group is absent/empty, falls back to `name`.
+ *   - combineFrom : like nameFrom, but for a target identifying a GROUP
+ *                conversation spread across several capture groups (e.g. a
+ *                group page's recipient list AND its sender). An array of
+ *                named capture groups; each is split on ", "/" and " into
+ *                individual names, the whole set is deduped and sorted, and
+ *                joined back into one stable name — so the same conversation
+ *                keys to the same target no matter who is currently speaking.
+ *                Takes precedence over nameFrom when both are present.
  *
  * For channel targets the derived/static name is passed through the profile's
  * channelAliases map (see common/channels.resolveChannelName) so different
@@ -92,6 +100,47 @@ function deriveName(target, match) {
   return target.name != null ? String(target.name).slice(0, MAX_NAME_LEN) : null;
 }
 
+// Split a raw captured name list ("Bob, Alice, and Joe" / "Bob and Alice" /
+// "Bob") into individual trimmed names. Handles a plain Oxford-comma list, a
+// bare "X and Y" pair, and a lone name, since a matched line may carry any of
+// those shapes depending on how many names it lists.
+function splitNameList(raw) {
+  if (raw == null) return [];
+  // The Oxford-comma alternative (", and ") must be tried before the plain
+  // comma one: at "X, and Y", a plain-comma-first match would consume only
+  // ", " and leave a dangling "and Y" in the next piece.
+  return String(raw)
+    .split(/\s*,\s*and\s+|\s*,\s*|\s+and\s+/i)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+// Like deriveName, but for a target that identifies a GROUP conversation
+// spread across multiple capture groups (e.g. a page's recipient list AND its
+// sender) rather than a single name. Gathers every group named in
+// target.combineFrom, splits each into individual names, dedupes
+// case-insensitively (keeping first-seen casing), sorts case-insensitively so
+// the result is stable no matter which participant's line is being routed
+// (whoever is speaking is excluded from their own "To:" list, so without this
+// the derived name would otherwise shift per message), and joins with ", ".
+function deriveCombinedName(target, match) {
+  const names = [];
+  for (const groupName of target.combineFrom) {
+    const raw = match.groups ? match.groups[groupName] : undefined;
+    if (raw != null) names.push(...splitNameList(raw));
+  }
+  const seen = new Map();
+  for (const n of names) {
+    const key = n.toLowerCase();
+    if (!seen.has(key)) seen.set(key, n);
+  }
+  if (seen.size === 0) return null;
+  const combined = [...seen.values()]
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
+    .join(', ');
+  return combined.slice(0, MAX_NAME_LEN);
+}
+
 /**
  * @param {Array<object>} rules
  * @param {{ channelAliases?: object, onWarning?: (message: string) => void }} [options]
@@ -123,7 +172,10 @@ function createRouter(rules, options = {}) {
       const t = rule.target || {};
       const role = t.role || ROLES.FEED;
 
-      let name = deriveName(t, match);
+      let name =
+        Array.isArray(t.combineFrom) && t.combineFrom.length > 0
+          ? deriveCombinedName(t, match)
+          : deriveName(t, match);
       if (role === ROLES.CHANNEL && name != null) {
         name = resolveChannelName(name, channelAliases);
       }

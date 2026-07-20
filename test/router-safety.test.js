@@ -123,6 +123,128 @@ function ok(cond, name) {
 }
 
 // ---------------------------------------------------------------------------
+// combineFrom: group-conversation targets built from multiple capture groups
+// (added for Liberation's group-page tabs — see router.js's deriveCombinedName)
+// ---------------------------------------------------------------------------
+
+// A single combineFrom group with an Oxford-comma 3-name list is split,
+// sorted case-insensitively, and joined.
+{
+  const rules = [
+    {
+      pattern: '^Long distance to (?<partners>[^:]+):',
+      target: { role: ROLES.PAGE, combineFrom: ['partners'] },
+      notify: null,
+    },
+  ];
+  const router = createRouter(rules);
+  const res = router.route('Long distance to Zed, Amanda, and Carol: hi all');
+  ok(res.role === ROLES.PAGE, 'combineFrom: routes to PAGE');
+  ok(
+    !!res.target && res.target.name === 'Amanda, Carol, Zed',
+    'combineFrom: Oxford-comma list split and sorted case-insensitively (got: ' +
+      (res.target && res.target.name) +
+      ')'
+  );
+}
+
+// A bare two-name "X and Y" list (no comma) is also split correctly.
+{
+  const rules = [
+    {
+      pattern: '^Long distance to (?<partners>[^:]+):',
+      target: { role: ROLES.PAGE, combineFrom: ['partners'] },
+      notify: null,
+    },
+  ];
+  const router = createRouter(rules);
+  const res = router.route('Long distance to Carol and Amanda: hi');
+  ok(
+    !!res.target && res.target.name === 'Amanda, Carol',
+    'combineFrom: "X and Y" (no comma) split correctly (got: ' + (res.target && res.target.name) + ')'
+  );
+}
+
+// Two combineFrom groups (recipients list + sender) merge into ONE stable
+// key, and it's the SAME key regardless of which participant is speaking —
+// this is the actual Liberation group-page bug fix.
+{
+  const rules = [
+    {
+      pattern: '^\\(To: (?<partners>[^)]+)\\) (?<sender>[^ (]+) pages: ',
+      target: { role: ROLES.PAGE, combineFrom: ['partners', 'sender'] },
+      notify: 'page',
+    },
+  ];
+  const router = createRouter(rules);
+  const fromDave = router.route('(To: Carol and Amanda) Dave pages: joinable?');
+  const fromCarol = router.route('(To: Dave and Amanda) Carol pages: sure');
+  ok(
+    !!fromDave.target && fromDave.target.name === 'Amanda, Carol, Dave',
+    'combineFrom: partners+sender merged and sorted (got: ' + (fromDave.target && fromDave.target.name) + ')'
+  );
+  ok(
+    !!fromDave.target && !!fromCarol.target && fromDave.target.key === fromCarol.target.key,
+    'combineFrom: same group conversation keys identically no matter who is speaking'
+  );
+}
+
+// Duplicate names across combined groups (e.g. same person appearing in both
+// captures) are deduped case-insensitively, keeping first-seen casing.
+{
+  const rules = [
+    {
+      pattern: '^\\(To: (?<partners>[^)]+)\\) (?<sender>[^ (]+) pages: ',
+      target: { role: ROLES.PAGE, combineFrom: ['partners', 'sender'] },
+      notify: 'page',
+    },
+  ];
+  const router = createRouter(rules);
+  const res = router.route('(To: Amanda, amanda) Dave pages: hi');
+  ok(
+    !!res.target && res.target.name === 'Amanda, Dave',
+    'combineFrom: case-insensitive dedupe keeps first-seen casing (got: ' + (res.target && res.target.name) + ')'
+  );
+}
+
+// The MAX_NAME_LEN cap (H1, same as nameFrom) still applies to a combined name.
+{
+  const rules = [
+    {
+      pattern: '^Long distance to (?<partners>[^:]+):',
+      target: { role: ROLES.PAGE, combineFrom: ['partners'] },
+      notify: null,
+    },
+  ];
+  const router = createRouter(rules);
+  const manyNames = Array.from({ length: 40 }, (_, i) => 'Name' + i).join(', ');
+  const res = router.route('Long distance to ' + manyNames + ': hi');
+  ok(!!res.target && res.target.name.length === 200, 'combineFrom: combined name is capped to 200 chars');
+}
+
+// A combineFrom group that fails to capture anything falls back to null,
+// same as nameFrom's missing-group behavior — never throws.
+{
+  const rules = [
+    {
+      pattern: '^solo line$',
+      target: { role: ROLES.PAGE, combineFrom: ['nope'] },
+      notify: null,
+    },
+  ];
+  const router = createRouter(rules);
+  let threw = false;
+  let res;
+  try {
+    res = router.route('solo line');
+  } catch (err) {
+    threw = true;
+  }
+  ok(!threw, 'combineFrom: unmatched group name does not throw');
+  ok(res.target && res.target.name === null, 'combineFrom: unmatched group name derives a null name');
+}
+
+// ---------------------------------------------------------------------------
 console.log('');
 if (failures === 0) {
   console.log('ALL TESTS PASSED');
