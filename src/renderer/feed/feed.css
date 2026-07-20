@@ -259,7 +259,7 @@ body.layout-ready #main {
   color: var(--accent);
 }
 
-/* --- inline image previews (main scrollback only) ------------------------- */
+/* --- inline image previews (main scrollback + Pages/Channels tabs) -------- */
 
 .inline-image {
   display: block;
@@ -344,22 +344,42 @@ body.layout-ready #main {
 }
 
 /* --- scrollbar (webkit) ---------------------------------------------------- */
+/* Shared across every independently-scrolling pane in the feed window: the
+   main scrollback, the cmdlog echo pane, and each Pages/Channels tab's
+   .tab-view — so they all read as one consistent scrollbar style rather than
+   the main pane getting a themed one and the rest falling back to Chromium's
+   default. */
 
-#scrollback::-webkit-scrollbar {
+#scrollback::-webkit-scrollbar,
+#cmdlog::-webkit-scrollbar,
+.tab-view::-webkit-scrollbar {
   width: 10px;
 }
 
-#scrollback::-webkit-scrollbar-track {
+/* Track background matches each pane's OWN background (not a shared value)
+   so the scrollbar blends into its pane instead of showing as a boxed-in
+   strip — #cmdlog's pane background is --bg-elevated, distinct from
+   --bg used by #scrollback/.tab-view (see their rules above). */
+#scrollback::-webkit-scrollbar-track,
+.tab-view::-webkit-scrollbar-track {
   background: var(--bg);
 }
 
-#scrollback::-webkit-scrollbar-thumb {
+#cmdlog::-webkit-scrollbar-track {
+  background: var(--bg-elevated);
+}
+
+#scrollback::-webkit-scrollbar-thumb,
+#cmdlog::-webkit-scrollbar-thumb,
+.tab-view::-webkit-scrollbar-thumb {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 5px;
 }
 
-#scrollback::-webkit-scrollbar-thumb:hover {
+#scrollback::-webkit-scrollbar-thumb:hover,
+#cmdlog::-webkit-scrollbar-thumb:hover,
+.tab-view::-webkit-scrollbar-thumb:hover {
   background: var(--border);
 }
 

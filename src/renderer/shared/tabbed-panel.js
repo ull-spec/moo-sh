@@ -23,11 +23,11 @@ import { createLineView } from './line-view.js';
 
 /**
  * @param {{ stripEl: HTMLElement, bodyEl: HTMLElement, emptyEl?: HTMLElement,
- *           maxLines?: number, maxTabs?: number,
+ *           maxLines?: number, maxTabs?: number, images?: boolean,
  *           hydrate?: (key: string) => Promise<Array<{seq:number,text:string}>> }} opts
  */
 export function createTabbedPanel(opts = {}) {
-  const { stripEl, bodyEl, emptyEl, maxLines, maxTabs = 50, hydrate } = opts;
+  const { stripEl, bodyEl, emptyEl, maxLines, maxTabs = 50, images, hydrate } = opts;
   // key -> { key, name, tabEl, viewEl, view, seen, hydrating, buffer }
   const tabs = new Map();
   let activeKey = null;
@@ -113,7 +113,7 @@ export function createTabbedPanel(opts = {}) {
     stripEl.appendChild(tabEl);
     bodyEl.appendChild(viewEl);
 
-    const view = createLineView(viewEl, { maxLines });
+    const view = createLineView(viewEl, { maxLines, images });
     const entry = { key, name, tabEl, viewEl, view, seen: new Set(), hydrating: false, buffer: [] };
     tabs.set(key, entry);
     return entry;

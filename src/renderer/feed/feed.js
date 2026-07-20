@@ -18,10 +18,10 @@ const inputFormEl = document.getElementById('inputform');
 const statusbarEl = document.getElementById('statusbar');
 const soundSlotEl = document.getElementById('sound-slot');
 
-// Inline image previews are opt-in per line-view: only the main scrollback
-// gets them. The #cmdlog echo view and the Pages/Channels tabbed panels
-// (tabbed-panel.js) intentionally omit the flag and keep rendering image
-// URLs as plain clickable links.
+// Inline image previews are opt-in per line-view. The main scrollback and the
+// Pages/Channels tabbed panels (tabbed-panel.js, below) all get them; only
+// the #cmdlog echo view (your own typed input) omits the flag and renders
+// image URLs as plain clickable links, since there's nothing to preview there.
 const view = createLineView(scrollbackEl, { images: true });
 
 // Separate, capped view echoing only the user's own outgoing input, shown in
@@ -39,6 +39,7 @@ const pagesPanel =
         bodyEl: document.getElementById('pages-body'),
         emptyEl: document.getElementById('pages-empty'),
         maxLines: 1000,
+        images: true,
         hydrate: (window.mush && typeof window.mush.getHistory === 'function')
           ? (key) => window.mush.getHistory('page', key)
           : undefined,
@@ -52,6 +53,7 @@ const channelsPanel =
         bodyEl: document.getElementById('channels-body'),
         emptyEl: document.getElementById('channels-empty'),
         maxLines: 1000,
+        images: true,
         hydrate: (window.mush && typeof window.mush.getHistory === 'function')
           ? (key) => window.mush.getHistory('channel', key)
           : undefined,
