@@ -147,7 +147,7 @@ function applyTheme(theme) {
 let soundState = normalizeSound(null);
 
 const SOUND_SRC = {
-  page: '../assets/sounds/page.wav',
+  page: '../assets/sounds/page.mp3',
   channel: '../assets/sounds/channel.wav',
   activity: '../assets/sounds/channel.wav', // activity intentionally reuses the channel wav
 };
