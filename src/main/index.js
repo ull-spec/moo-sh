@@ -20,6 +20,7 @@ const { app, Menu, ipcMain, shell } = require('electron');
 const { createConnection } = require('./connection');
 const { createRouter } = require('./router');
 const { createCaptureLog } = require('./capture-log');
+const { createPoseLog } = require('./pose-log');
 const { createWindowManager } = require('./window-manager');
 const { createHistoryStore } = require('./history-store');
 const { createHistoryPersistence } = require('./history-persist');
@@ -52,6 +53,9 @@ function profilesDir() {
 function capturesDir() {
   return path.join(app.getPath('userData'), 'captures');
 }
+function poseLogsDir() {
+  return path.join(app.getPath('userData'), 'pose-logs');
+}
 function historyDir() {
   return path.join(app.getPath('userData'), 'personal-history');
 }
@@ -60,6 +64,9 @@ let wm = null;
 let connection = null;
 let router = null;
 let capture = null;
+// Only created when the connected profile defines poseLogMarkers (currently
+// Liberation-only) — see profile-store's loadProfile and pose-log.js.
+let poseLog = null;
 let profile = null;
 let history = null;
 let historyPersist = null;
@@ -127,6 +134,15 @@ function startSession(id, loginName) {
     capture = createCaptureLog({ dir: capturesDir(), profileId: profile.id });
     capture.setEnabled(!!profile.capture);
 
+    poseLog = profile.poseLogMarkers
+      ? createPoseLog({
+          dir: poseLogsDir(),
+          profileId: profile.id,
+          openPattern: profile.poseLogMarkers.open,
+          closePattern: profile.poseLogMarkers.close,
+        })
+      : null;
+
     history = createHistoryStore({ maxLines: 500 });
     historyPersist = createHistoryPersistence({
       filePath: path.join(historyDir(), profile.id + '.json'),
@@ -156,6 +172,7 @@ function startSession(id, loginName) {
     // vanished on disk between the Connect window listing it and the click).
     profile = null;
     capture = null;
+    poseLog = null;
     history = null;
     historyPersist = null;
     router = null;
@@ -218,6 +235,7 @@ function setupConnection() {
     const routeText = stripAnsi(line);
     const result = router.route(routeText);
     capture.route(routeText, result);
+    if (poseLog) poseLog.line(routeText);
     const target = result.target;
     // One timestamp per incoming line, reused for every payload/history entry
     // derived from it (e.g. a page's synthetic divider AND its message line
@@ -347,15 +365,42 @@ function doDisconnect() {
 }
 
 function buildMenu() {
+  const connectionSubmenu = [
+    { label: 'Connect', accelerator: 'CmdOrCtrl+K', click: doConnect },
+    { label: 'Disconnect', accelerator: 'CmdOrCtrl+D', click: doDisconnect },
+  ];
+
+  // Pose log toggle is only meaningful (and only shown) for a profile that
+  // defines poseLogMarkers — currently Liberation. Unlike the Debug menu's
+  // raw-capture toggle below, this is a real user feature, not a dev tool, so
+  // it's available in packaged builds too.
+  if (poseLog) {
+    connectionSubmenu.push(
+      { type: 'separator' },
+      {
+        id: 'toggle-pose-log',
+        label: 'Pose log',
+        type: 'checkbox',
+        checked: poseLog.isEnabled(),
+        click: (item) => {
+          poseLog.setEnabled(item.checked);
+          toFeed(
+            'feed:system',
+            item.checked
+              ? `* Pose log ON -> ${path.join(poseLogsDir(), profile.id + '-poses-<date>.log')}`
+              : '* Pose log OFF.'
+          );
+        },
+      }
+    );
+  }
+
+  connectionSubmenu.push({ type: 'separator' }, { role: 'quit' });
+
   const template = [
     {
       label: 'Connection',
-      submenu: [
-        { label: 'Connect', accelerator: 'CmdOrCtrl+K', click: doConnect },
-        { label: 'Disconnect', accelerator: 'CmdOrCtrl+D', click: doDisconnect },
-        { type: 'separator' },
-        { role: 'quit' },
-      ],
+      submenu: connectionSubmenu,
     },
     {
       label: 'Settings',
@@ -572,6 +617,14 @@ ipcMain.on('renderer:ready', () => {
     'feed:system',
     capture.isEnabled() ? '* Raw capture is ON.' : '* Raw capture is OFF.'
   );
+  if (poseLog) {
+    toFeed(
+      'feed:system',
+      poseLog.isEnabled()
+        ? '* Pose log is ON.'
+        : '* Pose log is OFF. Use Connection > Pose log to start recording poses.'
+    );
+  }
   toFeed('feed:system', '* Use Connection > Connect (Ctrl+K) to connect.');
   if (profile.autoConnect || pendingConnect) {
     pendingConnect = false;
@@ -641,6 +694,7 @@ app.on('window-all-closed', () => {
   cancelReconnect();
   stopAntiIdle();
   if (capture) capture.close();
+  if (poseLog) poseLog.close();
   if (historyPersist) historyPersist.flushNow();
   if (connection) connection.disconnect();
   if (process.platform !== 'darwin') app.quit();
