@@ -80,6 +80,35 @@ let reconnectTimer = null;
 // connection failed or the server dropped us" — only the latter retries.
 let intentionalDisconnect = false;
 const RECONNECT_DELAY_MS = 30000;
+// True only while the socket is actually up (set on 'connect', cleared on
+// 'close'), independent of the antiIdleTimer itself — lets the settings:set
+// handler below know whether flipping the toggle mid-session should start the
+// timer immediately or just update the persisted preference for next time.
+let socketUp = false;
+// Pending setInterval handle for the anti-idle keepalive, or null if none is
+// running. See startAntiIdle()/stopAntiIdle().
+let antiIdleTimer = null;
+// Blank command cadence while connected, so the MUSH's own idle-timeout logic
+// never fires during a long AFK stretch. A blank line is a silent no-op on
+// PennMUSH/TinyMUSH/RhostMUSH-family servers (no output, no pose) but still
+// counts as input, which is what resets the per-connection idle clock.
+const ANTI_IDLE_INTERVAL_MS = 10 * 60 * 1000;
+
+function startAntiIdle() {
+  if (antiIdleTimer) return;
+  antiIdleTimer = setInterval(() => {
+    if (connection) connection.send('');
+  }, ANTI_IDLE_INTERVAL_MS);
+  // Never by itself keep the process alive — same discipline as
+  // reconnectTimer/historyPersist's debounce timer.
+  if (antiIdleTimer.unref) antiIdleTimer.unref();
+}
+
+function stopAntiIdle() {
+  if (!antiIdleTimer) return;
+  clearInterval(antiIdleTimer);
+  antiIdleTimer = null;
+}
 
 // Begin a session for the chosen profile id. Called once, from the Connect
 // window's 'connect:go' handler, after the login string has been persisted.
@@ -252,8 +281,12 @@ function setupConnection() {
       connection.send(cmd);
       toFeed('feed:system', '* Sent auto-login command.');
     }
+    socketUp = true;
+    if (!profile || profile.antiIdle !== false) startAntiIdle();
   });
   connection.on('close', () => {
+    socketUp = false;
+    stopAntiIdle();
     toFeed('feed:system', '* Connection closed.');
     // A drop the user didn't ask for (server restart, network blip, a
     // failed connect attempt) retries automatically; Disconnect/Quit does not.
@@ -463,6 +496,33 @@ ipcMain.handle('settings:set', (_event, patch) => {
   return merged;
 });
 
+// Anti-idle keepalive is a PER-PROFILE setting (unlike theme/sound above,
+// which are intentionally app-wide) — see profile-store.js's setAntiIdle for
+// why: two instances of this client connected to two different worlds must
+// not share one on/off switch. Scoped to `profile`/`profilesDir()`, both of
+// which are this instance's own in-memory session state, so a sibling
+// instance connected elsewhere never sees or affects this toggle.
+ipcMain.handle('profile:get-anti-idle', () => (!profile || profile.antiIdle !== false));
+ipcMain.handle('profile:set-anti-idle', (_event, value) => {
+  const v = !!value;
+  if (profile) {
+    profile.antiIdle = v;
+    try {
+      profileStore.setAntiIdle(profilesDir(), profile.id, v);
+    } catch (err) {
+      // Profile file may be unwritable; the in-memory value still governs
+      // this session even if the preference doesn't survive a restart.
+    }
+  }
+  // Live-apply without requiring a reconnect, same reasoning as before: only
+  // meaningful while a socket is actually up.
+  if (socketUp) {
+    if (v === false) stopAntiIdle();
+    else startAntiIdle();
+  }
+  return v;
+});
+
 // Atomic, disk-fresh roster append — see appendSoundRosterEntry's comment in
 // settings-store.js for why this exists instead of the Feed window sending a
 // full (and possibly stale) `sound` object like Settings does.
@@ -579,6 +639,7 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   cancelReconnect();
+  stopAntiIdle();
   if (capture) capture.close();
   if (historyPersist) historyPersist.flushNow();
   if (connection) connection.disconnect();

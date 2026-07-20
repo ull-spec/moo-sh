@@ -145,4 +145,8 @@ contextBridge.exposeInMainWorld('mush', {
       key: String(key == null ? '' : key),
     }),
   closeSettings: () => ipcRenderer.send('settings:close'),
+
+  // Per-profile (not app-wide) — see profile-store.js's setAntiIdle.
+  getProfileAntiIdle: () => ipcRenderer.invoke('profile:get-anti-idle'),
+  setProfileAntiIdle: (value) => ipcRenderer.invoke('profile:set-anti-idle', !!value),
 });

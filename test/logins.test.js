@@ -18,6 +18,7 @@ const {
   discoverProfiles,
   upsertLogin,
   persistLogin,
+  setAntiIdle,
   slugify,
   createProfile,
 } = require('../src/main/profile-store');
@@ -141,6 +142,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
     p.routingRules !== presets.familyRules);
   check('routing default: file on disk left untouched (in-memory only)',
     fs.readFileSync(legacyPath, 'utf8') === legacyContent);
+  check('anti-idle default: absent antiIdle defaulted to true', p.antiIdle === true);
 
   // An explicit empty array is a deliberate opt-out and must be respected.
   fs.writeFileSync(path.join(tmp, 'optout.json'), JSON.stringify({
@@ -272,6 +274,28 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
     written.logins.find((l) => l.name === 'B').autoLoginCommand === 'b2');
 }
 
+// --- 11b. setAntiIdle is per-profile and write-through -----------------------
+{
+  const aPath = path.join(tmp, 'anti-a.json');
+  const bPath = path.join(tmp, 'anti-b.json');
+  fs.writeFileSync(aPath, JSON.stringify({
+    id: 'anti-a', name: 'A', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+  }), 'utf8');
+  fs.writeFileSync(bPath, JSON.stringify({
+    id: 'anti-b', name: 'B', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+  }), 'utf8');
+
+  setAntiIdle(tmp, 'anti-a', false);
+
+  const writtenA = JSON.parse(fs.readFileSync(aPath, 'utf8'));
+  const writtenB = JSON.parse(fs.readFileSync(bPath, 'utf8'));
+  check('setAntiIdle: toggled profile written as false', writtenA.antiIdle === false);
+  check('setAntiIdle: sibling profile untouched (defaults true on load)',
+    loadProfile(tmp, 'anti-b').antiIdle === true);
+}
+
 // --- 12. slugify ------------------------------------------------------------
 {
   check('slugify: lowercases + hyphenates spaces', slugify('My New MUSH') === 'my-new-mush');
@@ -303,7 +327,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
     written.logins[0].name === 'Default' && written.logins[0].autoLoginCommand === '');
   check('create: no stray fields',
     Object.keys(written).sort().join(',') ===
-      'channelAliases,charset,host,id,logins,name,port,routingRules,tls,tlsAllowInsecure');
+      'antiIdle,channelAliases,charset,host,id,logins,name,port,routingRules,tls,tlsAllowInsecure');
   check('create: seeded with default channelAliases and routingRules',
     Object.keys(written.channelAliases).length === 0 &&
       JSON.stringify(written.routingRules) === JSON.stringify(presets.familyRules));

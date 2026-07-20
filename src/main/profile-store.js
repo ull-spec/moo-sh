@@ -77,6 +77,16 @@ function loadProfile(profilesDir, id) {
     parsed.routingRules = JSON.parse(JSON.stringify(presets.familyRules));
   }
 
+  // Anti-idle keepalive (see index.js's startAntiIdle) is per-world: one
+  // server's idle-timeout policy has nothing to do with another's, and two
+  // instances of this client connected to two different profiles must not
+  // share a single on/off switch. Defaulting true (rather than requiring an
+  // explicit opt-in) matches this feature's original always-on behavior for
+  // any profile that predates the toggle.
+  if (typeof parsed.antiIdle !== 'boolean') {
+    parsed.antiIdle = true;
+  }
+
   return parsed;
 }
 
@@ -145,6 +155,21 @@ function persistLogin(profilesDir, id, name, autoLoginCommand) {
   return merged;
 }
 
+// Same write-through-to-the-real-file pattern as persistLogin: reads the
+// current profile (real file if present, else the .example.json template),
+// flips just the antiIdle field, and always writes the REAL `<id>.json` —
+// so toggling anti-idle on a profile that only had an example file on disk
+// forks it into a real one, same as any other per-profile edit.
+function setAntiIdle(profilesDir, id, value) {
+  const merged = loadProfile(profilesDir, id);
+  delete merged.__sourceFile;
+  merged.antiIdle = !!value;
+
+  const realFile = path.join(profilesDir, `${id}.json`);
+  fs.writeFileSync(realFile, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  return merged;
+}
+
 // Turn a human world name into a filesystem/id slug:
 // lowercase, non-alphanumeric runs collapsed to single hyphens, ends trimmed.
 // "My New MUSH" -> "my-new-mush". Empty/slug-less names fall back to "world".
@@ -189,6 +214,7 @@ function createProfile(profilesDir, { name, host, port, charset, tls, tlsAllowIn
     logins: [{ name: 'Default', autoLoginCommand: '' }],
     channelAliases: {},
     routingRules: presets.familyRules,
+    antiIdle: true,
   };
 
   const realFile = path.join(profilesDir, `${id}.json`);
@@ -202,6 +228,7 @@ module.exports = {
   discoverProfiles,
   upsertLogin,
   persistLogin,
+  setAntiIdle,
   slugify,
   createProfile,
 };

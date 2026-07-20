@@ -18,6 +18,7 @@ import { normalizeSound, addToRoster, isMuted, setMuted } from '../shared/sound.
 
 const fontSelectEl = document.getElementById('font-select');
 const resetColorsBtn = document.getElementById('btn-reset-colors');
+const antiIdleEl = document.getElementById('anti-idle');
 const soundPageEl = document.getElementById('sound-page');
 const soundChannelEl = document.getElementById('sound-channel');
 const soundActivityEl = document.getElementById('sound-activity');
@@ -35,6 +36,10 @@ let themeState = {};
 // Kept in sync with settings.sound, same discipline as themeState: every
 // write sends the COMPLETE object because main shallow-merges.
 let soundState = normalizeSound(null);
+
+// A plain boolean top-level setting, unlike theme/sound — no partial-object
+// merge risk, so it's just sent as-is on Confirm.
+let antiIdleState = true;
 
 function applyFontMono(name) {
   const v = fontFamilyValue(name);
@@ -165,16 +170,32 @@ function clearThemePreview() {
 
 async function load() {
   clearThemePreview();
-  if (!window.mush || typeof window.mush.getSettings !== 'function') return;
-  try {
-    const settings = await window.mush.getSettings();
-    themeState = (settings && settings.theme) || {};
-    initFontPicker(themeState.fontMono);
-    initColorPickers(themeState.colors);
-    soundState = normalizeSound(settings && settings.sound);
-    renderSound();
-  } catch (e) {
-    // Settings window has no fallback view; leave controls at their defaults.
+  if (window.mush && typeof window.mush.getSettings === 'function') {
+    try {
+      const settings = await window.mush.getSettings();
+      themeState = (settings && settings.theme) || {};
+      initFontPicker(themeState.fontMono);
+      initColorPickers(themeState.colors);
+      soundState = normalizeSound(settings && settings.sound);
+      renderSound();
+    } catch (e) {
+      // Settings window has no fallback view; leave controls at their defaults.
+    }
+  }
+  // Per-profile, not part of the app-wide settings object above — see
+  // preload.js/profile-store.js's setAntiIdle.
+  if (window.mush && typeof window.mush.getProfileAntiIdle === 'function') {
+    try {
+      antiIdleState = await window.mush.getProfileAntiIdle();
+      if (antiIdleEl) antiIdleEl.checked = antiIdleState;
+    } catch (e) {
+      // getProfileAntiIdle rejected: the checkbox stays at its HTML default
+      // (unchecked). antiIdleState must match that, not the module's `true`
+      // default (set at declaration, for the common success path) — otherwise
+      // an untouched Confirm click would persist `true` while the box showed
+      // unchecked.
+      antiIdleState = antiIdleEl ? antiIdleEl.checked : false;
+    }
   }
 }
 
@@ -229,6 +250,12 @@ async function confirmChanges() {
     themeState = (merged && merged.theme) || newTheme;
     soundState = normalizeSound(merged && merged.sound);
     renderSound();
+
+    // Per-profile, written through its own channel — see load()'s comment.
+    if (window.mush && typeof window.mush.setProfileAntiIdle === 'function') {
+      antiIdleState = await window.mush.setProfileAntiIdle(antiIdleState);
+      if (antiIdleEl) antiIdleEl.checked = antiIdleState;
+    }
     // Apply + close, standard OK/Cancel dialog behavior. Both action buttons
     // dismiss the window, so no separate Close button is needed (see the doc
     // note on why Close was consolidated into Cancel/Confirm rather than added).
@@ -256,6 +283,12 @@ for (const key of COLOR_KEYS) {
 }
 
 if (resetColorsBtn) resetColorsBtn.addEventListener('click', resetColors);
+
+if (antiIdleEl) {
+  antiIdleEl.addEventListener('change', () => {
+    antiIdleState = antiIdleEl.checked;
+  });
+}
 
 if (soundPageEl) {
   soundPageEl.addEventListener('change', () => {
