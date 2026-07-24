@@ -80,11 +80,11 @@ function loadProfile(profilesDir, id) {
   // Anti-idle keepalive (see index.js's startAntiIdle) is per-world: one
   // server's idle-timeout policy has nothing to do with another's, and two
   // instances of this client connected to two different profiles must not
-  // share a single on/off switch. Defaulting true (rather than requiring an
-  // explicit opt-in) matches this feature's original always-on behavior for
-  // any profile that predates the toggle.
+  // share a single on/off switch. Opt-in: absent means off, so a profile
+  // that predates the toggle (or one the user has never visited Settings
+  // for) doesn't silently start sending keepalive traffic.
   if (typeof parsed.antiIdle !== 'boolean') {
-    parsed.antiIdle = true;
+    parsed.antiIdle = false;
   }
 
   return parsed;
@@ -214,7 +214,7 @@ function createProfile(profilesDir, { name, host, port, charset, tls, tlsAllowIn
     logins: [{ name: 'Default', autoLoginCommand: '' }],
     channelAliases: {},
     routingRules: presets.familyRules,
-    antiIdle: true,
+    antiIdle: false,
   };
 
   const realFile = path.join(profilesDir, `${id}.json`);

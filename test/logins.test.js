@@ -142,7 +142,19 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
     p.routingRules !== presets.familyRules);
   check('routing default: file on disk left untouched (in-memory only)',
     fs.readFileSync(legacyPath, 'utf8') === legacyContent);
-  check('anti-idle default: absent antiIdle defaulted to true', p.antiIdle === true);
+  check('anti-idle default: absent antiIdle defaulted to false', p.antiIdle === false);
+
+  // A profile that has genuinely opted in must survive a load unchanged —
+  // the opt-in default only fills in when the field is absent/non-boolean,
+  // never overriding an explicit true.
+  const onPath = path.join(tmp, 'anti-on.json');
+  fs.writeFileSync(onPath, JSON.stringify({
+    id: 'anti-on', name: 'AntiOn', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+    antiIdle: true,
+  }), 'utf8');
+  check('anti-idle explicit true: preserved through loadProfile unchanged',
+    loadProfile(tmp, 'anti-on').antiIdle === true);
 
   // An explicit empty array is a deliberate opt-out and must be respected.
   fs.writeFileSync(path.join(tmp, 'optout.json'), JSON.stringify({
@@ -287,13 +299,13 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
     logins: [{ name: 'Default', autoLoginCommand: '' }],
   }), 'utf8');
 
-  setAntiIdle(tmp, 'anti-a', false);
+  setAntiIdle(tmp, 'anti-a', true);
 
   const writtenA = JSON.parse(fs.readFileSync(aPath, 'utf8'));
   const writtenB = JSON.parse(fs.readFileSync(bPath, 'utf8'));
-  check('setAntiIdle: toggled profile written as false', writtenA.antiIdle === false);
-  check('setAntiIdle: sibling profile untouched (defaults true on load)',
-    loadProfile(tmp, 'anti-b').antiIdle === true);
+  check('setAntiIdle: toggled profile written as true', writtenA.antiIdle === true);
+  check('setAntiIdle: sibling profile untouched (defaults false on load)',
+    loadProfile(tmp, 'anti-b').antiIdle === false);
 }
 
 // --- 12. slugify ------------------------------------------------------------

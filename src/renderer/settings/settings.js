@@ -38,8 +38,9 @@ let themeState = {};
 let soundState = normalizeSound(null);
 
 // A plain boolean top-level setting, unlike theme/sound — no partial-object
-// merge risk, so it's just sent as-is on Confirm.
-let antiIdleState = true;
+// merge risk, so it's just sent as-is on Confirm. Matches the checkbox's
+// HTML default (unchecked) and the profile-store default (opt-in, off).
+let antiIdleState = false;
 
 function applyFontMono(name) {
   const v = fontFamilyValue(name);
@@ -189,11 +190,10 @@ async function load() {
       antiIdleState = await window.mush.getProfileAntiIdle();
       if (antiIdleEl) antiIdleEl.checked = antiIdleState;
     } catch (e) {
-      // getProfileAntiIdle rejected: the checkbox stays at its HTML default
-      // (unchecked). antiIdleState must match that, not the module's `true`
-      // default (set at declaration, for the common success path) — otherwise
-      // an untouched Confirm click would persist `true` while the box showed
-      // unchecked.
+      // getProfileAntiIdle rejected: fall back to whatever the checkbox
+      // shows (its HTML default is unchecked, matching antiIdleState's own
+      // module default) so an untouched Confirm click persists the same
+      // value the box displays.
       antiIdleState = antiIdleEl ? antiIdleEl.checked : false;
     }
   }

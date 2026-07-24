@@ -300,7 +300,7 @@ function setupConnection() {
       toFeed('feed:system', '* Sent auto-login command.');
     }
     socketUp = true;
-    if (!profile || profile.antiIdle !== false) startAntiIdle();
+    if (profile && profile.antiIdle === true) startAntiIdle();
   });
   connection.on('close', () => {
     socketUp = false;
@@ -547,7 +547,7 @@ ipcMain.handle('settings:set', (_event, patch) => {
 // not share one on/off switch. Scoped to `profile`/`profilesDir()`, both of
 // which are this instance's own in-memory session state, so a sibling
 // instance connected elsewhere never sees or affects this toggle.
-ipcMain.handle('profile:get-anti-idle', () => (!profile || profile.antiIdle !== false));
+ipcMain.handle('profile:get-anti-idle', () => (!!profile && profile.antiIdle === true));
 ipcMain.handle('profile:set-anti-idle', (_event, value) => {
   const v = !!value;
   if (profile) {
