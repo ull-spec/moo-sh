@@ -30,6 +30,9 @@
  *                individual names, the whole set is deduped and sorted, and
  *                joined back into one stable name — so the same conversation
  *                keys to the same target no matter who is currently speaking.
+ *                Each name has a trailing "(alias)" suffix stripped, and your
+ *                own name (options.selfNames) is dropped from the set, so the
+ *                incoming and outgoing sides of one group page agree.
  *                Takes precedence over nameFrom when both are present.
  *
  * For channel targets the derived/static name is passed through the profile's
@@ -104,6 +107,14 @@ function deriveName(target, match) {
 // "Bob") into individual trimmed names. Handles a plain Oxford-comma list, a
 // bare "X and Y" pair, and a lone name, since a matched line may carry any of
 // those shapes depending on how many names it lists.
+//
+// Each name also has a trailing parenthetical alias suffix stripped: a group
+// page's recipient list is written by the server as
+// "(To: Carol Doe(cd) and Niaj(nj))", while the local echo of your own
+// outgoing page carries bare names ("You paged Carol Doe and Niaj with ..."),
+// so without stripping, one conversation would key to two different windows.
+// This mirrors what the single-name page rules already do by ending their
+// capture group at the `(`.
 function splitNameList(raw) {
   if (raw == null) return [];
   // The Oxford-comma alternative (", and ") must be tried before the plain
@@ -111,8 +122,18 @@ function splitNameList(raw) {
   // ", " and leave a dangling "and Y" in the next piece.
   return String(raw)
     .split(/\s*,\s*and\s+|\s*,\s*|\s+and\s+/i)
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\s*\([^()]*\)$/, '').trim())
     .filter((s) => s.length > 0);
+}
+
+// Normalize the configured "me" names into a lookup set (see deriveCombinedName).
+function normalizeSelfNames(selfNames) {
+  const list = Array.isArray(selfNames) ? selfNames : selfNames == null ? [] : [selfNames];
+  return new Set(
+    list
+      .map((n) => String(n == null ? '' : n).trim().toLowerCase())
+      .filter((n) => n.length > 0)
+  );
 }
 
 // Like deriveName, but for a target that identifies a GROUP conversation
@@ -123,7 +144,16 @@ function splitNameList(raw) {
 // the result is stable no matter which participant's line is being routed
 // (whoever is speaking is excluded from their own "To:" list, so without this
 // the derived name would otherwise shift per message), and joins with ", ".
-function deriveCombinedName(target, match) {
+//
+// YOUR OWN name is then dropped from the set (selfNames, from the active login
+// name — see createRouter). A group page's recipient list is written from the
+// RECEIVER's point of view and so includes you —
+// "(To: Carol Doe(cd) and Niaj(nj)) Peggy(peg) pages: ..." — while the
+// local echo of your own group page never does —
+// "You paged Peggy and Niaj with '...'". Without dropping self, those two
+// sides of one conversation key to two different windows. Self is only dropped
+// when at least one other name remains, so a page to yourself keeps a name.
+function deriveCombinedName(target, match, selfNames) {
   const names = [];
   for (const groupName of target.combineFrom) {
     const raw = match.groups ? match.groups[groupName] : undefined;
@@ -135,7 +165,12 @@ function deriveCombinedName(target, match) {
     if (!seen.has(key)) seen.set(key, n);
   }
   if (seen.size === 0) return null;
-  const combined = [...seen.values()]
+  let values = [...seen.values()];
+  if (selfNames && selfNames.size > 0) {
+    const others = values.filter((n) => !selfNames.has(n.toLowerCase()));
+    if (others.length > 0) values = others;
+  }
+  const combined = values
     .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))
     .join(', ');
   return combined.slice(0, MAX_NAME_LEN);
@@ -143,12 +178,14 @@ function deriveCombinedName(target, match) {
 
 /**
  * @param {Array<object>} rules
- * @param {{ channelAliases?: object, onWarning?: (message: string) => void }} [options]
+ * @param {{ channelAliases?: object, selfNames?: string|string[],
+ *           onWarning?: (message: string) => void }} [options]
  */
 function createRouter(rules, options = {}) {
   const onWarning = options && typeof options.onWarning === 'function' ? options.onWarning : null;
   let compiled = compileRules(rules, onWarning);
   let channelAliases = (options && options.channelAliases) || {};
+  let selfNames = normalizeSelfNames(options && options.selfNames);
 
   function defaultResult() {
     return { role: ROLES.FEED, target: null, notify: null, match: null };
@@ -174,7 +211,7 @@ function createRouter(rules, options = {}) {
 
       let name =
         Array.isArray(t.combineFrom) && t.combineFrom.length > 0
-          ? deriveCombinedName(t, match)
+          ? deriveCombinedName(t, match, selfNames)
           : deriveName(t, match);
       if (role === ROLES.CHANNEL && name != null) {
         name = resolveChannelName(name, channelAliases);
@@ -199,7 +236,11 @@ function createRouter(rules, options = {}) {
     channelAliases = aliases || {};
   }
 
-  return { route, setRules, setChannelAliases };
+  function setSelfNames(names) {
+    selfNames = normalizeSelfNames(names);
+  }
+
+  return { route, setRules, setChannelAliases, setSelfNames };
 }
 
 module.exports = { createRouter };

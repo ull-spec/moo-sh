@@ -152,8 +152,17 @@ function startSession(id, loginName) {
     });
     historyPersist.load();
 
+    // selfNames tells the router which name in a group page's recipient list is
+    // YOU, so the incoming side ("(To: Carol Doe(cd) and Niaj(nj))
+    // Peggy(peg) pages: ...") and the outgoing echo ("You paged Peggy and
+    // Niaj with '...'") collapse to ONE window instead of two. It defaults to
+    // the name of the login the user picked in the Connect window — so naming a
+    // login after the character it logs in as is what makes this work — and a
+    // profile can override it with an explicit `selfNames` array (e.g. when one
+    // login's character is known by more than one name).
     router = createRouter(profile.routingRules || [], {
       channelAliases: profile.channelAliases || {},
+      selfNames: Array.isArray(profile.selfNames) ? profile.selfNames : activeLoginName,
       onWarning: (msg) => toFeed('feed:system', `* ${msg}`),
     });
 
