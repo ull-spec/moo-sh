@@ -19,8 +19,11 @@ const {
   upsertLogin,
   persistLogin,
   setAntiIdle,
+  setColor,
   slugify,
   createProfile,
+  isHexColor,
+  orderProfiles,
 } = require('../src/main/profile-store');
 const presets = require('../src/main/routing-presets');
 
@@ -339,12 +342,13 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
     written.logins[0].name === 'Default' && written.logins[0].autoLoginCommand === '');
   check('create: no stray fields',
     Object.keys(written).sort().join(',') ===
-      'antiIdle,channelAliases,charset,host,id,logins,name,port,routingRules,tls,tlsAllowInsecure');
+      'antiIdle,channelAliases,charset,color,host,id,logins,name,port,routingRules,routingRulesVersion,tls,tlsAllowInsecure');
   check('create: seeded with default channelAliases and routingRules',
     Object.keys(written.channelAliases).length === 0 &&
       JSON.stringify(written.routingRules) === JSON.stringify(presets.familyRules));
   check('create: tls/tlsAllowInsecure default to false when not passed',
     written.tls === false && written.tlsAllowInsecure === false);
+  check('create: color defaults to null when not passed', written.color === null);
   check('create: charset honored when provided',
     createProfile(cpTmp, { name: 'Latin World', host: 'h', port: 1, charset: 'latin1' }).charset === 'latin1');
   check('create: tls/tlsAllowInsecure honored when provided',
@@ -384,6 +388,195 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-'));
   check('collision: avoids an existing .example.json id', d.id === 'seeded-2');
 
   fs.rmSync(colTmp, { recursive: true, force: true });
+}
+
+// --- 15. loadProfile color defaulting/sanitizing -----------------------------
+{
+  const colorTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-color-'));
+
+  // No color key at all -> null (non-breaking default for pre-feature profiles).
+  fs.writeFileSync(path.join(colorTmp, 'nocolor.json'), JSON.stringify({
+    id: 'nocolor', name: 'NoColor', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+  }), 'utf8');
+  check('color default: absent color defaulted to null',
+    loadProfile(colorTmp, 'nocolor').color === null);
+
+  // Garbage on disk must never survive load — it flows into a CSS custom property.
+  fs.writeFileSync(path.join(colorTmp, 'badcolor.json'), JSON.stringify({
+    id: 'badcolor', name: 'BadColor', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+    color: 'red',
+  }), 'utf8');
+  check('color sanitize: invalid "red" sanitized to null',
+    loadProfile(colorTmp, 'badcolor').color === null);
+
+  fs.writeFileSync(path.join(colorTmp, 'shortcolor.json'), JSON.stringify({
+    id: 'shortcolor', name: 'ShortColor', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+    color: '#12',
+  }), 'utf8');
+  check('color sanitize: invalid short hex "#12" sanitized to null',
+    loadProfile(colorTmp, 'shortcolor').color === null);
+
+  // Valid hex passes through untouched.
+  fs.writeFileSync(path.join(colorTmp, 'goodcolor.json'), JSON.stringify({
+    id: 'goodcolor', name: 'GoodColor', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+    color: '#ff6b6b',
+  }), 'utf8');
+  check('color valid: "#ff6b6b" passed through unchanged',
+    loadProfile(colorTmp, 'goodcolor').color === '#ff6b6b');
+
+  fs.rmSync(colorTmp, { recursive: true, force: true });
+}
+
+// --- 16. setColor -------------------------------------------------------------
+{
+  const scTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-setcolor-'));
+
+  fs.writeFileSync(path.join(scTmp, 'w.json'), JSON.stringify({
+    id: 'w', name: 'W', host: 'h', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+  }), 'utf8');
+
+  const afterSet = setColor(scTmp, 'w', '#a98bff');
+  check('setColor: return value has the new color', afterSet.color === '#a98bff');
+  check('setColor: persisted to disk',
+    JSON.parse(fs.readFileSync(path.join(scTmp, 'w.json'), 'utf8')).color === '#a98bff');
+  check('setColor: round-trips through loadProfile',
+    loadProfile(scTmp, 'w').color === '#a98bff');
+
+  const afterClear = setColor(scTmp, 'w', null);
+  check('setColor: null clears the color', afterClear.color === null);
+  check('setColor: clear persisted to disk',
+    JSON.parse(fs.readFileSync(path.join(scTmp, 'w.json'), 'utf8')).color === null);
+
+  // Set a valid color, then attempt invalid sets — disk must not change.
+  setColor(scTmp, 'w', '#35c8b0');
+  const beforeInvalid = fs.readFileSync(path.join(scTmp, 'w.json'), 'utf8');
+
+  const afterRed = setColor(scTmp, 'w', 'red');
+  check('setColor: invalid "red" rejected, returned profile unchanged', afterRed.color === '#35c8b0');
+  check('setColor: invalid "red" did not touch disk',
+    fs.readFileSync(path.join(scTmp, 'w.json'), 'utf8') === beforeInvalid);
+
+  const afterBadHex = setColor(scTmp, 'w', '#GGGGGG');
+  check('setColor: invalid "#GGGGGG" rejected, returned profile unchanged', afterBadHex.color === '#35c8b0');
+  check('setColor: invalid "#GGGGGG" did not touch disk',
+    fs.readFileSync(path.join(scTmp, 'w.json'), 'utf8') === beforeInvalid);
+
+  // setColor on an id with only an example file forks a real one, like setAntiIdle.
+  fs.writeFileSync(path.join(scTmp, 'ex.example.json'), JSON.stringify({
+    id: 'ex', name: 'Ex', host: 'h', port: 1,
+    autoLoginCommand: '',
+  }), 'utf8');
+  check('setColor: no real file exists yet for "ex"', !fs.existsSync(path.join(scTmp, 'ex.json')));
+  setColor(scTmp, 'ex', '#ef78c8');
+  check('setColor: forked a real "ex.json" file', fs.existsSync(path.join(scTmp, 'ex.json')));
+  check('setColor: forked file has the new color',
+    JSON.parse(fs.readFileSync(path.join(scTmp, 'ex.json'), 'utf8')).color === '#ef78c8');
+
+  fs.rmSync(scTmp, { recursive: true, force: true });
+}
+
+// --- 17. discoverProfiles includes color in summaries ------------------------
+{
+  const dcTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-disc-color-'));
+  fs.writeFileSync(path.join(dcTmp, 'alpha.json'), JSON.stringify({
+    id: 'alpha', name: 'Alpha', host: 'h1', port: 1,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+    color: '#6fcf7f',
+  }), 'utf8');
+  fs.writeFileSync(path.join(dcTmp, 'beta.json'), JSON.stringify({
+    id: 'beta', name: 'Beta', host: 'h2', port: 2,
+    logins: [{ name: 'Default', autoLoginCommand: '' }],
+  }), 'utf8');
+
+  const profiles = discoverProfiles(dcTmp);
+  const alpha = profiles.find((p) => p.id === 'alpha');
+  const beta = profiles.find((p) => p.id === 'beta');
+  check('discover: color present for colored profile', alpha.color === '#6fcf7f');
+  check('discover: color null for uncolored profile', beta.color === null);
+
+  fs.rmSync(dcTmp, { recursive: true, force: true });
+}
+
+// --- 18. createProfile with color option --------------------------------------
+{
+  const cpcTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mush-logins-cpcolor-'));
+
+  const withColor = createProfile(cpcTmp, { name: 'Colored World', host: 'h', port: 1, color: '#e3c14e' });
+  check('createProfile: valid color persisted', withColor.color === '#e3c14e');
+  check('createProfile: valid color written to disk',
+    JSON.parse(fs.readFileSync(path.join(cpcTmp, 'colored-world.json'), 'utf8')).color === '#e3c14e');
+
+  const noColor = createProfile(cpcTmp, { name: 'Plain World', host: 'h', port: 1 });
+  check('createProfile: no color yields null', noColor.color === null);
+
+  const badColor = createProfile(cpcTmp, { name: 'Bad World', host: 'h', port: 1, color: 'not-a-color' });
+  check('createProfile: invalid color yields null', badColor.color === null);
+
+  fs.rmSync(cpcTmp, { recursive: true, force: true });
+}
+
+// --- 19. isHexColor -----------------------------------------------------------
+{
+  check('isHexColor: valid lowercase hex', isHexColor('#ff6b6b') === true);
+  check('isHexColor: valid uppercase hex', isHexColor('#FF6B6B') === true);
+  check('isHexColor: rejects short hex', isHexColor('#fff') === false);
+  check('isHexColor: rejects non-hex string', isHexColor('red') === false);
+  check('isHexColor: rejects null', isHexColor(null) === false);
+  check('isHexColor: rejects undefined', isHexColor(undefined) === false);
+}
+
+// --- 20. orderProfiles ---------------------------------------------------------
+{
+  const profiles = [
+    { id: 'alpha', name: 'Alpha' },
+    { id: 'beta', name: 'Beta' },
+    { id: 'gamma', name: 'Gamma' },
+  ];
+  const order = ['gamma', 'alpha'];
+  const originalProfiles = JSON.stringify(profiles);
+  const originalOrder = JSON.stringify(order);
+
+  const result = orderProfiles(profiles, order);
+  check('orderProfiles: normal reorder puts order-listed ids first, in order',
+    result.map((p) => p.id).join(',') === 'gamma,alpha,beta');
+  check('orderProfiles: returns a new array', result !== profiles);
+  check('orderProfiles: does not mutate profiles input', JSON.stringify(profiles) === originalProfiles);
+  check('orderProfiles: does not mutate order input', JSON.stringify(order) === originalOrder);
+
+  // Unknown id in order (stale/deleted world) is ignored.
+  const withUnknown = orderProfiles(profiles, ['ghost', 'beta']);
+  check('orderProfiles: unknown id in order ignored',
+    withUnknown.map((p) => p.id).join(',') === 'beta,alpha,gamma');
+
+  // New profile not present in order is appended last, preserving relative order.
+  const withNew = orderProfiles(profiles, ['beta']);
+  check('orderProfiles: profiles absent from order appended last, relative order kept',
+    withNew.map((p) => p.id).join(',') === 'beta,alpha,gamma');
+
+  // Duplicate id in order is not duplicated in the output.
+  const withDup = orderProfiles(profiles, ['alpha', 'alpha', 'beta']);
+  check('orderProfiles: duplicate id in order not duplicated',
+    withDup.map((p) => p.id).join(',') === 'alpha,beta,gamma' &&
+    withDup.filter((p) => p.id === 'alpha').length === 1);
+
+  // Non-string entries in order are ignored.
+  const withNonString = orderProfiles(profiles, [42, 'beta', null, {}]);
+  check('orderProfiles: non-string order entries ignored',
+    withNonString.map((p) => p.id).join(',') === 'beta,alpha,gamma');
+
+  // Non-array order -> shallow copy of profiles, unchanged order.
+  const notArrayOrder = orderProfiles(profiles, 'nope');
+  check('orderProfiles: non-array order returns profiles unchanged (shallow copy)',
+    notArrayOrder !== profiles && notArrayOrder.map((p) => p.id).join(',') === 'alpha,beta,gamma');
+
+  // Non-array profiles -> [].
+  check('orderProfiles: non-array profiles returns []', Array.isArray(orderProfiles('nope', order)) && orderProfiles('nope', order).length === 0);
+  check('orderProfiles: null profiles returns []', orderProfiles(null, order).length === 0);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

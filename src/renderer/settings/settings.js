@@ -19,6 +19,9 @@ import { normalizeSound, addToRoster, isMuted, setMuted } from '../shared/sound.
 const fontSelectEl = document.getElementById('font-select');
 const resetColorsBtn = document.getElementById('btn-reset-colors');
 const antiIdleEl = document.getElementById('anti-idle');
+const selfNamesEl = document.getElementById('self-names');
+const routingNoticeEl = document.getElementById('routing-notice');
+const resetRoutingBtn = document.getElementById('btn-reset-routing');
 const soundPageEl = document.getElementById('sound-page');
 const soundChannelEl = document.getElementById('sound-channel');
 const soundActivityEl = document.getElementById('sound-activity');
@@ -41,6 +44,23 @@ let soundState = normalizeSound(null);
 // merge risk, so it's just sent as-is on Confirm. Matches the checkbox's
 // HTML default (unchecked) and the profile-store default (opt-in, off).
 let antiIdleState = false;
+
+// Per-profile routing state, staged exactly like everything else in this
+// window: the reset button only ARMS the reset, and Confirm is what actually
+// performs it. Resetting immediately on click would break the window's
+// Cancel-means-nothing-happened contract for the one action here that can't be
+// undone by reloading from disk.
+let routingState = { customized: false, selfNames: [], inferred: false, loginName: '' };
+let routingResetArmed = false;
+
+// Exact text load() put in the self-names field, so Confirm can tell an
+// untouched field from an edited one. Confirm must NOT write back an untouched
+// value: when it was only inferred from the login command, persisting it
+// freezes the guess, and a world with several named logins would keep using
+// the wrong character's name after reconnecting as somebody else. Comparing
+// text (rather than trusting a 'did this element ever fire input') keeps
+// type-then-undo correctly classified as untouched.
+let selfNamesLoadedText = '';
 
 function applyFontMono(name) {
   const v = fontFamilyValue(name);
@@ -112,6 +132,53 @@ function initFontPicker(saved) {
   }
   // No saved font: leave the select at its default first option and persist
   // nothing.
+}
+
+// The notice appears only for a world whose routing rules were hand-edited:
+// stock rules are silently brought up to date by the profile loader, so there
+// is nothing for the user to decide about those. Once the reset is armed the
+// same element becomes the confirmation of what Confirm will do, which keeps
+// this field to a single line of state instead of two competing messages.
+// Populating the text field is deliberately NOT part of renderRouting: that
+// runs on every reset-button click too, and re-assigning .value there would
+// wipe out whatever the user was halfway through typing. Only load() and a
+// successful Confirm — the two moments the field's contents are genuinely
+// authoritative again — call this.
+function renderSelfNamesField() {
+  if (!selfNamesEl) return;
+  selfNamesEl.value = routingState.selfNames.join(', ');
+  selfNamesLoadedText = selfNamesEl.value;
+  selfNamesEl.placeholder = routingState.loginName || 'Default';
+  // An inferred value looks identical to a stored one in the field, so say
+  // which it is on hover. Confirming without editing leaves an inferred value
+  // inferred — see confirmChanges.
+  selfNamesEl.title = routingState.inferred
+    ? 'Guessed from this world’s login command. Edit and Confirm to set it explicitly.'
+    : '';
+}
+
+function renderRouting() {
+  if (resetRoutingBtn) {
+    resetRoutingBtn.disabled = routingResetArmed;
+    resetRoutingBtn.textContent = routingResetArmed
+      ? 'Will reset on Confirm'
+      : 'Reset routing rules to defaults';
+  }
+  if (!routingNoticeEl) return;
+  if (routingResetArmed) {
+    routingNoticeEl.hidden = false;
+    routingNoticeEl.textContent =
+      'Routing rules for this world will be replaced with the current defaults when you press Confirm.';
+  } else if (routingState.customized) {
+    routingNoticeEl.hidden = false;
+    routingNoticeEl.textContent =
+      "This world's routing rules were customized and predate the multi-word name fix, " +
+      'so they were left as they are. Pages from names like "Bob Roe" may land in the ' +
+      'main feed instead of their own tab until you reset them.';
+  } else {
+    routingNoticeEl.hidden = true;
+    routingNoticeEl.textContent = '';
+  }
 }
 
 function renderSoundList(container, names, mutedMap, kind) {
@@ -197,6 +264,24 @@ async function load() {
       antiIdleState = antiIdleEl ? antiIdleEl.checked : false;
     }
   }
+  // Also per-profile. A pending (armed but unconfirmed) reset is dropped here,
+  // which is exactly what makes Cancel a true revert for this field too.
+  routingResetArmed = false;
+  if (window.mush && typeof window.mush.getProfileRouting === 'function') {
+    try {
+      const routing = await window.mush.getProfileRouting();
+      routingState = {
+        customized: !!(routing && routing.customized),
+        selfNames: Array.isArray(routing && routing.selfNames) ? routing.selfNames : [],
+        inferred: !!(routing && routing.selfNamesInferred),
+        loginName: (routing && routing.loginName) || '',
+      };
+    } catch (e) {
+      routingState = { customized: false, selfNames: [], inferred: false, loginName: '' };
+    }
+  }
+  renderSelfNamesField();
+  renderRouting();
 }
 
 // Cancel discards every staged edit by reloading from disk (clearThemePreview
@@ -256,6 +341,34 @@ async function confirmChanges() {
       antiIdleState = await window.mush.setProfileAntiIdle(antiIdleState);
       if (antiIdleEl) antiIdleEl.checked = antiIdleState;
     }
+    // Per-profile routing, same as anti-idle. Ordered AFTER the reset so a
+    // single Confirm that does both ends with the user's names applied on top
+    // of the freshly-reset rules.
+    if (routingResetArmed && window.mush && typeof window.mush.resetProfileRoutingRules === 'function') {
+      await window.mush.resetProfileRoutingRules();
+      routingResetArmed = false;
+      routingState = { ...routingState, customized: false };
+    }
+    // Only written when the field was ACTUALLY edited. Confirming an untouched
+    // field must be a no-op: the displayed value may be a guess inferred from
+    // the login command, and writing it back would freeze it, so a world with
+    // several named logins would keep stripping the wrong character's name
+    // from group pages after reconnecting as somebody else. Leaving it alone
+    // keeps it re-inferred per session, tracking whoever is logged in. Sent as
+    // the raw comma-separated text; main normalizes it and returns what it
+    // really stored, which is what the field is then re-rendered from.
+    const selfNamesEdited = selfNamesEl && selfNamesEl.value !== selfNamesLoadedText;
+    if (selfNamesEdited && window.mush && typeof window.mush.setProfileSelfNames === 'function') {
+      const stored = await window.mush.setProfileSelfNames(selfNamesEl.value);
+      routingState = {
+        ...routingState,
+        selfNames: Array.isArray(stored) ? stored : [],
+        inferred: false,
+      };
+      renderSelfNamesField();
+    }
+    renderRouting();
+
     // Apply + close, standard OK/Cancel dialog behavior. Both action buttons
     // dismiss the window, so no separate Close button is needed (see the doc
     // note on why Close was consolidated into Cancel/Confirm rather than added).
@@ -287,6 +400,13 @@ if (resetColorsBtn) resetColorsBtn.addEventListener('click', resetColors);
 if (antiIdleEl) {
   antiIdleEl.addEventListener('change', () => {
     antiIdleState = antiIdleEl.checked;
+  });
+}
+
+if (resetRoutingBtn) {
+  resetRoutingBtn.addEventListener('click', () => {
+    routingResetArmed = true;
+    renderRouting();
   });
 }
 

@@ -33,6 +33,17 @@
       <div class="hint">Sends a blank line to the server every 10 minutes while connected, so the MUSH's own idle-timeout doesn't disconnect you during a long AFK stretch.</div>
     </div>
     <div class="field">
+      <label for="self-names">Your character name(s)</label>
+      <input id="self-names" type="text" autocomplete="off" spellcheck="false" placeholder="Default">
+      <div class="hint">Comma-separated, for this world only. Used to recognise you in a group page's recipient list, so a conversation you're part of stays in one tab instead of splitting in two. Seeded from your login command if left blank.</div>
+    </div>
+    <div class="field">
+      <label>Message routing</label>
+      <div id="routing-notice" class="notice" hidden></div>
+      <button id="btn-reset-routing" type="button">Reset routing rules to defaults</button>
+      <div class="hint">Restores this world's page/channel rules to the client's current defaults. Nothing else about the world changes.</div>
+    </div>
+    <div class="field">
       <label>Sound notifications</label>
       <div class="sound-toggle-row">
         <label class="sound-toggle"><input type="checkbox" id="sound-page"> <span>Page</span></label>

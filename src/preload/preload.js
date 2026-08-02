@@ -9,7 +9,8 @@
  * IPC contract (channels are an internal detail; the renderer only uses the
  * wrapped methods below):
  *   main -> renderer:
- *     'feed:init'    payload { role, target, profileName }  (sent once, on ready)
+ *     'feed:init'    payload { role, target, profileName, color }  (sent once,
+ *                    on ready; color is a validated #rrggbb hex or null)
  *     'feed:line'    payload string  (a decoded server line, may contain ANSI;
  *                    deliberately untimestamped — see main/index.js, timestamps
  *                    are reserved for Pages/Channels, not the main-feed firehose)
@@ -37,10 +38,16 @@
  *
  * Connect (world chooser) window — same preload, extra methods:
  *   renderer -> main:
- *     'connect:list-profiles' (invoke) -> [{ id, name, host, port, logins:[{name,autoLoginCommand}] }]
+ *     'connect:list-profiles' (invoke) -> [{ id, name, host, port, color,
+ *                    logins:[{name,autoLoginCommand}] }]  (list arrives already
+ *                    sorted into the user's persisted worldOrder; worlds not
+ *                    yet ordered trail alphabetically after the ordered ones)
  *     'connect:go'   payload { id, loginName, autoLoginCommand }  (existing world)
- *                 or payload { newWorld:{name,host,port,charset,tls,tlsAllowInsecure}, loginName, autoLoginCommand }
+ *                 or payload { newWorld:{name,host,port,charset,tls,tlsAllowInsecure,color}, loginName, autoLoginCommand }
  *                    (create + connect a brand-new world)
+ *     'connect:set-profile-order' (invoke) payload array of profile-id strings
+ *                    -> the persisted array (app-wide Worlds-list order; see
+ *                    settings-store.js's worldOrder)
  *     'connect:quit'                    (user clicked Quit)
  *   main -> renderer:
  *     'connect:error' payload string  (session start failed after Connect was
@@ -62,6 +69,27 @@
  *                 { seq, text, ts } (in-memory per-key scrollback for tab
  *                 rehydration; ts is null for entries persisted before
  *                 timestamps existed)
+ *     'profile:get-anti-idle' (invoke) -> boolean (current session's profile,
+ *                 or false if no session)
+ *     'profile:set-anti-idle' (invoke) payload boolean -> the boolean applied
+ *                 (per-profile, scoped to the active session; see
+ *                 profile-store.js's setAntiIdle)
+ *     'profile:get-routing' (invoke) -> { customized, selfNames, loginName }
+ *                 (per-profile; `customized` means this world's routing rules
+ *                 were hand-edited and so were NOT auto-migrated to the current
+ *                 preset, which is what the reset action below is for)
+ *     'profile:reset-routing-rules' (invoke) -> boolean (writes the current
+ *                 preset over this profile's routingRules, leaving every other
+ *                 profile field untouched, and live-applies it to the router)
+ *     'profile:set-self-names' (invoke) payload string|string[] -> the
+ *                 normalized string[] actually stored (your own character
+ *                 name(s), used to keep both sides of a group page in one tab)
+ *     'profile:set-color' (invoke) payload { id, color } -> the normalized
+ *                 color actually stored (#rrggbb or null), so the renderer can
+ *                 reconcile optimistic UI against what was really written.
+ *                 Addressed BY PROFILE ID rather than the active session,
+ *                 because colors are set from the Connect window before any
+ *                 session exists (see main/index.js for the full reasoning)
  *   main -> renderer:
  *     'settings:changed' payload = full merged settings object (broadcast to
  *                 ALL open windows after any settings write, so every renderer
@@ -105,6 +133,11 @@ contextBridge.exposeInMainWorld('mush', {
 
   // Connect (world chooser) window
   listProfiles: () => ipcRenderer.invoke('connect:list-profiles'),
+  setProfileOrder: (ids) =>
+    ipcRenderer.invoke(
+      'connect:set-profile-order',
+      Array.isArray(ids) ? ids.map((v) => String(v == null ? '' : v)) : []
+    ),
   onConnectError: (cb) => on('connect:error', cb),
   connectGo: (payload) => {
     const msg = {
@@ -125,6 +158,11 @@ contextBridge.exposeInMainWorld('mush', {
         charset: String(nw.charset != null ? nw.charset : ''),
         tls: !!nw.tls,
         tlsAllowInsecure: !!nw.tlsAllowInsecure,
+        // Not hex-validated here on purpose: profileStore.createProfile in
+        // main is the single validation point and already rejects anything
+        // malformed (falls back to null), so duplicating that check here
+        // would just be a second place to keep in sync.
+        color: typeof nw.color === 'string' ? nw.color : null,
       };
     }
     ipcRenderer.send('connect:go', msg);
@@ -149,4 +187,23 @@ contextBridge.exposeInMainWorld('mush', {
   // Per-profile (not app-wide) — see profile-store.js's setAntiIdle.
   getProfileAntiIdle: () => ipcRenderer.invoke('profile:get-anti-idle'),
   setProfileAntiIdle: (value) => ipcRenderer.invoke('profile:set-anti-idle', !!value),
+
+  // Per-profile routing, scoped to the active session like anti-idle above.
+  getProfileRouting: () => ipcRenderer.invoke('profile:get-routing'),
+  resetProfileRoutingRules: () => ipcRenderer.invoke('profile:reset-routing-rules'),
+  setProfileSelfNames: (names) =>
+    ipcRenderer.invoke(
+      'profile:set-self-names',
+      Array.isArray(names)
+        ? names.map((v) => String(v == null ? '' : v))
+        : String(names == null ? '' : names)
+    ),
+
+  // Per-profile, addressed BY ID rather than the active session, because the
+  // Connect window sets colors before any session exists (see main/index.js).
+  setProfileColor: (id, hexOrNull) =>
+    ipcRenderer.invoke('profile:set-color', {
+      id: String(id == null ? '' : id),
+      color: typeof hexOrNull === 'string' ? hexOrNull : null,
+    }),
 });

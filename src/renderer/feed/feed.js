@@ -369,6 +369,20 @@ if (window.mush) {
       statusbarEl.textContent = name;
     }
     document.title = `MOO-SH — ${name}`;
+
+    // Tints this window's top accent strip (see feed.css) so several
+    // simultaneously-open MOO-SH windows (one OS process each, tiled under
+    // Hyprland) can be told apart at a glance. Main already validates the
+    // color before it ever reaches this payload; isHexColor is re-checked
+    // here anyway because it is the one place this value reaches
+    // setProperty, and per color.js's own rule only a validated 6-digit hex
+    // may ever reach setProperty.
+    const c = info && info.color;
+    if (isHexColor(c)) {
+      document.documentElement.style.setProperty('--profile-accent-color', c);
+    } else {
+      document.documentElement.style.removeProperty('--profile-accent-color');
+    }
   });
 
   window.mush.ready();

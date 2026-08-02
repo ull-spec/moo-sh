@@ -38,20 +38,46 @@ test('migrates when userData dir is empty/absent and legacy has .json files', ()
   fs.rmSync(path.dirname(userData), { recursive: true, force: true });
 });
 
-test('no-op when userData dir already has a .json (never overwrites)', () => {
+test('a same-named file already in userData is never overwritten, but does not block other legacy names', () => {
   const legacy = mkTmp('mush-storage-legacy-');
   const userData = mkTmp('mush-storage-user-');
 
-  fs.writeFileSync(path.join(userData, 'existing.json'), JSON.stringify({ id: 'existing' }), 'utf8');
+  fs.writeFileSync(path.join(userData, 'existing.json'), JSON.stringify({ id: 'existing-real' }), 'utf8');
+  fs.writeFileSync(path.join(legacy, 'existing.json'), JSON.stringify({ id: 'existing-legacy' }), 'utf8');
   fs.writeFileSync(path.join(legacy, 'other.json'), JSON.stringify({ id: 'other' }), 'utf8');
 
   const copied = migrateProfiles(legacy, userData);
 
-  assert.deepEqual(copied, []);
-  assert.ok(!fs.existsSync(path.join(userData, 'other.json')));
+  assert.deepEqual(copied, ['other.json']);
+  // The pre-existing file's content is untouched, not clobbered by the legacy copy.
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(userData, 'existing.json'), 'utf8')), { id: 'existing-real' });
+  assert.ok(fs.existsSync(path.join(userData, 'other.json')));
 
   fs.rmSync(legacy, { recursive: true, force: true });
   fs.rmSync(userData, { recursive: true, force: true });
+});
+
+test('a name that failed to migrate is retried on the next run, without re-copying names that already succeeded', () => {
+  const legacy = mkTmp('mush-storage-legacy-');
+  const userData = path.join(mkTmp('mush-storage-user-'), 'profiles');
+
+  fs.writeFileSync(path.join(legacy, 'a.json'), JSON.stringify({ id: 'a' }), 'utf8');
+  fs.mkdirSync(path.join(legacy, 'b.json')); // a DIRECTORY named b.json — forces copyFileSync to throw
+
+  const firstRun = migrateProfiles(legacy, userData);
+  assert.deepEqual(firstRun, ['a.json']);
+  assert.ok(!fs.existsSync(path.join(userData, 'b.json')));
+
+  // The transient failure clears up before the next launch retries it.
+  fs.rmdirSync(path.join(legacy, 'b.json'));
+  fs.writeFileSync(path.join(legacy, 'b.json'), JSON.stringify({ id: 'b' }), 'utf8');
+
+  const secondRun = migrateProfiles(legacy, userData);
+  assert.deepEqual(secondRun, ['b.json']); // only the previously-failed name, not a.json again
+  assert.ok(fs.existsSync(path.join(userData, 'b.json')));
+
+  fs.rmSync(legacy, { recursive: true, force: true });
+  fs.rmSync(path.dirname(userData), { recursive: true, force: true });
 });
 
 test('no-op when legacyDir does not exist', () => {

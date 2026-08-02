@@ -6,13 +6,28 @@
 // Flow:
 //   1. ask main for the discovered profiles (connect:list-profiles); each
 //      profile now carries a non-empty `logins[]` array of named entries
-//      ({ name, autoLoginCommand }) instead of a single login string.
+//      ({ name, autoLoginCommand }) instead of a single login string, plus
+//      an optional `color` (#rrggbb or null). listProfiles() already returns
+//      them in the user's persisted display order — never sort in here.
 //   2. show worlds in the left list; selecting one fills host + rebuilds the
 //      Character dropdown from that world's logins, plus a trailing
 //      "+ New character..." option. Selecting a character fills the Login
 //      field below. Selecting "+ New character..." reveals an inline text
 //      input for the new character's name instead.
-//   3. Connect -> window.mush.connectGo({ id, loginName, autoLoginCommand })
+//   3. Each world's detail pane also shows a row of color swatches (the fixed
+//      PROFILE_COLORS palette, plus a "none" control). Picking one updates the
+//      in-memory profile + its list dot immediately, then persists via
+//      window.mush.setProfileColor(id, hex) and reconciles with whatever
+//      value actually got stored (main may reject/normalize it). A brand-new
+//      world has no profile id yet, so its chosen color is held in
+//      `newWorldColor` and only reaches disk indirectly, riding along inside
+//      the `connectGo({ newWorld: { ..., color } })` payload.
+//   4. The world list itself is drag-and-drop reorderable (standard HTML5
+//      dragstart/dragover/drop/dragend). A drop splices `profiles` into the
+//      new order, re-renders, and persists the whole order app-wide via
+//      window.mush.setProfileOrder(ids). The trailing "+ New World..." row is
+//      not draggable and never a drop target — it lives outside `profiles`.
+//   5. Connect -> window.mush.connectGo({ id, loginName, autoLoginCommand })
 //      Quit    -> window.mush.connectQuit()
 //
 // The login string is shown in a masked (type="password") field because it
@@ -21,10 +36,13 @@
 // and characters and back does not lose typing; they are only persisted to
 // disk by main when Connect is clicked.
 
+import { PROFILE_COLORS } from '../shared/color.js';
+
 const listEl = document.getElementById('profile-list');
 const hostportEl = document.getElementById('hostport');
 const characterEl = document.getElementById('character');
 const newNameEl = document.getElementById('new-name');
+const colorSwatchesEl = document.getElementById('color-swatches');
 const loginEl = document.getElementById('login');
 const detailEl = document.getElementById('detail');
 const connectBtn = document.getElementById('btn-connect');
@@ -41,6 +59,7 @@ const nwCharsetEl = document.getElementById('nw-charset');
 const nwTlsEl = document.getElementById('nw-tls');
 const nwTlsInsecureEl = document.getElementById('nw-tls-insecure');
 const nwTlsInsecureFieldEl = document.getElementById('nw-tls-insecure-field');
+const nwColorSwatchesEl = document.getElementById('nw-color-swatches');
 const nwErrorEl = document.getElementById('nw-error');
 
 // Sentinel option value for "+ New character...". A leading space makes it
@@ -57,9 +76,130 @@ let selectedLogin = null; // character name string, or NEW_SENTINEL, or null
 // the on-disk value shown).
 const edits = new Map();
 
+// Color chosen for a brand-new world (no profile id exists yet, so it can't
+// be sent via setProfileColor — it rides along in the connectGo payload
+// instead). Reset to null whenever the new-world form is (re)opened.
+let newWorldColor = null;
+
+// id of the world currently being dragged in the world list, or null.
+let dragId = null;
+
 function editKey(worldId, loginName) {
   return worldId + ' ' + loginName;
 }
+
+// Builds one color-swatch row (a "none" control plus one button per
+// PROFILE_COLORS entry) into containerEl. Shared by the existing-world row
+// and the new-world row so the markup/behavior can't drift between them.
+// Real <button>s (not <div>s) so Enter/Space activation and tab focus come
+// for free; type="button" so these never behave as an implicit form submit.
+function buildSwatches(containerEl, onPick) {
+  if (!containerEl) return;
+  containerEl.textContent = '';
+
+  const noneBtn = document.createElement('button');
+  noneBtn.type = 'button';
+  noneBtn.className = 'swatch none';
+  noneBtn.dataset.hex = '';
+  noneBtn.title = 'No color';
+  noneBtn.setAttribute('role', 'radio');
+  noneBtn.setAttribute('aria-label', 'No color');
+  noneBtn.setAttribute('aria-checked', 'false');
+  noneBtn.addEventListener('click', () => onPick(null));
+  containerEl.appendChild(noneBtn);
+
+  for (const { hex, name } of PROFILE_COLORS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'swatch';
+    btn.dataset.hex = hex;
+    btn.title = name;
+    btn.setAttribute('role', 'radio');
+    btn.setAttribute('aria-label', name);
+    btn.setAttribute('aria-checked', 'false');
+    // Only ever assigned via the style property from a fixed, curated palette
+    // (never string-concatenated into markup) — see PROFILE_COLORS in color.js.
+    btn.style.backgroundColor = hex;
+    btn.addEventListener('click', () => onPick(hex));
+    containerEl.appendChild(btn);
+  }
+}
+
+// Marks exactly the control matching hexOrNull as selected (the "none"
+// control's data-hex is '', matched when hexOrNull is null/falsy).
+function markSelected(containerEl, hexOrNull) {
+  if (!containerEl) return;
+  const target = hexOrNull || '';
+  for (const btn of containerEl.children) {
+    const match = btn.dataset.hex === target;
+    btn.classList.toggle('selected', match);
+    btn.setAttribute('aria-checked', match ? 'true' : 'false');
+  }
+}
+
+// Updates just one world's list dot in place. Deliberately NOT a full
+// renderList(): renderList() re-runs selectProfile(), which rebuilds the
+// Character dropdown back to the world's first login — fine after a drag
+// reorder, but wrong here, since it would silently discard whichever
+// character the user had picked while they were merely clicking a swatch.
+function updateListDot(id) {
+  let li = null;
+  for (const child of listEl.children) {
+    if (child.dataset.id === id) { li = child; break; }
+  }
+  if (!li) return;
+  const profile = profiles.find((p) => p.id === id);
+  if (!profile) return;
+
+  let dot = li.querySelector('.world-dot');
+  if (profile.color) {
+    if (!dot) {
+      dot = document.createElement('span');
+      dot.className = 'world-dot';
+      li.insertBefore(dot, li.firstChild);
+    }
+    dot.style.backgroundColor = profile.color;
+  } else if (dot) {
+    dot.remove();
+  }
+}
+
+// Click handler for the existing-world color row (buildSwatches' onPick).
+function pickExistingColor(hex) {
+  if (selectedId == null || selectedId === NEW_WORLD_SENTINEL) return;
+  const id = selectedId;
+  const profile = profiles.find((p) => p.id === id);
+  if (!profile) return;
+
+  // Optimistic UI: reflect the pick instantly, then reconcile once the write
+  // to disk resolves (main normalizes/validates, and resolves null if the
+  // write was rejected or failed — that must not leave the UI showing a
+  // color that was never actually persisted).
+  profile.color = hex;
+  markSelected(colorSwatchesEl, hex);
+  updateListDot(id);
+
+  if (window.mush && typeof window.mush.setProfileColor === 'function') {
+    window.mush.setProfileColor(id, hex)
+      .then((resolved) => {
+        const p = profiles.find((pp) => pp.id === id);
+        if (!p || p.color === resolved) return;
+        p.color = resolved;
+        if (selectedId === id) markSelected(colorSwatchesEl, resolved);
+        updateListDot(id);
+      })
+      .catch(() => {});
+  }
+}
+
+// Click handler for the new-world color row.
+function pickNewWorldColor(hex) {
+  newWorldColor = hex;
+  markSelected(nwColorSwatchesEl, hex);
+}
+
+buildSwatches(colorSwatchesEl, pickExistingColor);
+buildSwatches(nwColorSwatchesEl, pickNewWorldColor);
 
 function selectProfile(id) {
   // Remember any edit to the field we are leaving.
@@ -71,6 +211,13 @@ function selectProfile(id) {
   ) {
     edits.set(editKey(selectedId, selectedLogin), loginEl.value);
   }
+
+  // Whether the new-world form was ALREADY open before this call. A drag
+  // reorder re-renders the list and re-selects whatever was selected, which
+  // can land back here with the form already open and half-filled — that is a
+  // re-selection, not a fresh open, and must not discard anything the user
+  // typed or picked.
+  const wasNewWorld = selectedId === NEW_WORLD_SENTINEL;
 
   selectedId = id;
 
@@ -85,6 +232,13 @@ function selectProfile(id) {
     newWorldEl.hidden = false;
     nwErrorEl.hidden = true;
     selectedLogin = null;
+    // A previously-abandoned new-world color choice must not leak into the
+    // next new world — but only clear it when the form is genuinely being
+    // opened. The name/host/port inputs are plain DOM and survive a
+    // re-selection untouched, so silently wiping just the color would be
+    // both inconsistent and invisible to the user.
+    if (!wasNewWorld) newWorldColor = null;
+    markSelected(nwColorSwatchesEl, newWorldColor);
     updateNewWorldValidity();
     nwNameEl.focus();
     return;
@@ -102,12 +256,14 @@ function selectProfile(id) {
     newNameEl.hidden = true;
     loginEl.value = '';
     selectedLogin = null;
+    markSelected(colorSwatchesEl, null);
     connectBtn.disabled = true;
     return;
   }
 
   const port = profile.port ? String(profile.port) : '(no port set)';
   hostportEl.textContent = `${profile.host || '(no host)'}:${port}${profile.tls ? ' (TLS)' : ''}`;
+  markSelected(colorSwatchesEl, profile.color || null);
 
   // Rebuild the Character dropdown from this world's logins.
   characterEl.textContent = '';
@@ -164,22 +320,98 @@ function selectCharacter(name) {
   loginEl.value = edits.has(key) ? edits.get(key) : onDisk;
 }
 
-function renderList() {
+// dragover fires continuously while hovering; preventDefault is required on
+// it (not just on drop) for the browser to allow a drop at all.
+function onDragOver(event) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  event.currentTarget.classList.add('drag-over');
+}
+
+function onDragLeave(event) {
+  event.currentTarget.classList.remove('drag-over');
+}
+
+function onDragStart(event, id) {
+  dragId = id;
+  event.dataTransfer.effectAllowed = 'move';
+  // Chromium requires some data to be set for a drag to reliably start; the
+  // value itself isn't read back (the reorder logic uses the closed-over id).
+  event.dataTransfer.setData('text/plain', id);
+  event.currentTarget.classList.add('dragging');
+}
+
+function onDrop(event, targetId) {
+  event.preventDefault();
+  event.currentTarget.classList.remove('drag-over');
+  if (dragId == null || dragId === targetId) return;
+
+  const fromIndex = profiles.findIndex((p) => p.id === dragId);
+  const toIndex = profiles.findIndex((p) => p.id === targetId);
+  if (fromIndex === -1 || toIndex === -1) return;
+
+  const [moved] = profiles.splice(fromIndex, 1);
+  profiles.splice(toIndex, 0, moved);
+
+  // Preserve whatever was selected before the reorder — a drop must not
+  // reset the detail pane back to the first world.
+  renderList({ preserveSelection: true });
+
+  if (window.mush && typeof window.mush.setProfileOrder === 'function') {
+    window.mush.setProfileOrder(profiles.map((p) => p.id)).catch(() => {});
+  }
+}
+
+function onDragEnd() {
+  dragId = null;
+  for (const li of listEl.children) {
+    li.classList.remove('dragging', 'drag-over');
+  }
+}
+
+// `preserveSelection: true` re-applies whatever was selected before this
+// render (used after a drag-and-drop reorder) instead of resetting to the
+// first world. The auto-select-first/new-world-form behavior is otherwise
+// only meant for the very first render after load().
+function renderList(options) {
+  const preserveSelection = !!(options && options.preserveSelection);
+  const previousSelectedId = selectedId;
+
   listEl.textContent = '';
   detailEl.hidden = false;
 
   for (const profile of profiles) {
     const li = document.createElement('li');
-    li.textContent = profile.name || profile.id;
+
+    // Omit the dot entirely when there's no color — no placeholder swatch.
+    if (profile.color) {
+      const dot = document.createElement('span');
+      dot.className = 'world-dot';
+      dot.style.backgroundColor = profile.color;
+      li.appendChild(dot);
+    }
+    const nameEl = document.createElement('span');
+    nameEl.className = 'world-name';
+    nameEl.textContent = profile.name || profile.id;
+    li.appendChild(nameEl);
+
     li.dataset.id = profile.id;
+    li.draggable = true;
     li.addEventListener('click', () => selectProfile(profile.id));
     li.addEventListener('dblclick', () => doConnect());
+    li.addEventListener('dragstart', (event) => onDragStart(event, profile.id));
+    li.addEventListener('dragover', onDragOver);
+    li.addEventListener('dragleave', onDragLeave);
+    li.addEventListener('drop', (event) => onDrop(event, profile.id));
+    li.addEventListener('dragend', onDragEnd);
     listEl.appendChild(li);
   }
 
   // Trailing "+ New World..." entry: selecting it reveals the create-world
   // form (no dblclick-to-connect, since its fields must be filled first).
   // Always present, so a first-run user with no saved worlds can create one.
+  // Not draggable and never a drop target — it isn't part of `profiles` and
+  // must always stay last, so it gets none of the drag/drop listeners above.
   const newWorldLi = document.createElement('li');
   newWorldLi.textContent = '+ New World...';
   newWorldLi.dataset.id = NEW_WORLD_SENTINEL;
@@ -187,7 +419,9 @@ function renderList() {
   newWorldLi.addEventListener('click', () => selectProfile(NEW_WORLD_SENTINEL));
   listEl.appendChild(newWorldLi);
 
-  if (profiles.length > 0) {
+  if (preserveSelection && previousSelectedId != null) {
+    selectProfile(previousSelectedId);
+  } else if (profiles.length > 0) {
     // Auto-select the first world so Connect is immediately usable.
     selectProfile(profiles[0].id);
   } else {
@@ -231,7 +465,7 @@ function doConnect() {
     }
     if (window.mush && typeof window.mush.connectGo === 'function') {
       window.mush.connectGo({
-        newWorld: { name, host, port: Number(port), charset, tls: useTls, tlsAllowInsecure },
+        newWorld: { name, host, port: Number(port), charset, tls: useTls, tlsAllowInsecure, color: newWorldColor },
         loginName: 'Default',
         autoLoginCommand: '',
       });

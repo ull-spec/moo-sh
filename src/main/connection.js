@@ -120,6 +120,25 @@ function createConnection({ host, port, charset, tls: useTls, tlsAllowInsecure }
       socket = net.createConnection({ host, port });
       socket.on('connect', () => emitter.emit('connect'));
     }
+    // TCP keepalive. Without it a MU* socket has NO way to notice a peer that
+    // went away silently: this protocol is idle for long stretches by nature
+    // (nobody types for an hour, the server sends nothing), so there is no
+    // traffic whose failure would surface the break. Across a laptop
+    // suspend/resume the interface drops and any NAT mapping in the middle
+    // very likely expires, yet the local socket keeps believing it is
+    // connected — no 'error', no 'close', and therefore no auto-reconnect.
+    // Keepalive probes make the OS test the path itself and eventually fail
+    // the socket for real, which is what fires 'close' upstairs.
+    //
+    // 30s is the idle time BEFORE the first probe, not the detection time:
+    // the retry interval and probe count stay at the OS defaults (on Linux,
+    // 9 probes 75s apart), so a truly dead peer is declared dead a few
+    // minutes in. That is deliberate — this is a safety net against a dead
+    // socket, not an idle-prevention mechanism (the server-facing anti-idle
+    // keepalive is separate, opt-in, and lives in the main process). A bare
+    // ACK every so often on an otherwise idle connection costs nothing.
+    socket.setKeepAlive(true, 30000);
+
     socket.on('data', onData);
     socket.on('error', (err) => emitter.emit('error', err));
     socket.on('close', () => {

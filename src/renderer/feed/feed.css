@@ -90,6 +90,18 @@ body {
   display: flex;
   min-height: 0;
   visibility: hidden;
+  /* Thin accent strip so several simultaneously-open MOO-SH windows (one OS
+     process each, tiled side by side under Hyprland) can be told apart at a
+     glance, not just by title-bar text. --profile-accent-color is injected at
+     runtime by feed.js from the feed:init payload's per-world `color`;
+     `transparent` here is the fallback for worlds with no color set, so the
+     strip is invisible but still occupies its 4px either way — a size that
+     depends on whether a color is set would be worse than a uniform 4px.
+     box-sizing: border-box keeps that 4px inside #main's own flex-basis
+     rather than adding to it, so it can never push #inputform off the bottom
+     of the 100vh column or introduce a scrollbar. */
+  box-sizing: border-box;
+  border-top: 4px solid var(--profile-accent-color, transparent);
 }
 
 body.layout-ready #main {

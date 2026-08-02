@@ -31,6 +31,11 @@ const DEFAULTS = {
   schemaVersion: 1,
   layout: {},
   theme: {},
+  // App-wide UI ordering preference for the Connect window's Worlds list (an
+  // ordered array of profile ids), deliberately NOT per-profile. Unknown/new
+  // ids are handled at read time by profileStore.orderProfiles rather than
+  // being pruned here on write.
+  worldOrder: [],
   // Mirrors the DEFAULT_SOUND shape in src/renderer/shared/sound.js. Exactly
   // like `theme`, callers must always send the COMPLETE `sound` object in a
   // patch (updateSettings does a shallow top-level merge), or sibling fields

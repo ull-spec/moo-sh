@@ -50,3 +50,20 @@ test('COLOR_KEYS / COLOR_VARS', async () => {
     assert.ok(Object.prototype.hasOwnProperty.call(COLOR_VARS, key), `COLOR_VARS should have an entry for ${key}`);
   }
 });
+
+test('PROFILE_COLORS', async () => {
+  const { PROFILE_COLORS, isHexColor, DEFAULT_COLORS } = await loadColorModule();
+  assert.ok(Array.isArray(PROFILE_COLORS));
+  assert.strictEqual(PROFILE_COLORS.length, 9);
+
+  const seen = new Set();
+  for (const entry of PROFILE_COLORS) {
+    assert.strictEqual(isHexColor(entry.hex), true, `${entry.hex} should be a valid hex color`);
+    assert.strictEqual(typeof entry.name, 'string');
+    assert.ok(entry.name.length > 0, 'name should be non-empty');
+    seen.add(entry.hex.toLowerCase());
+    assert.notStrictEqual(entry.hex.toLowerCase(), DEFAULT_COLORS.accent.toLowerCase(),
+      'a preset must not collide with the default accent color');
+  }
+  assert.strictEqual(seen.size, PROFILE_COLORS.length, 'all preset hexes should be unique');
+});

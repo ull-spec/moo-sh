@@ -197,10 +197,50 @@ async function testGracefulDisconnectStillCloses() {
   await close(server);
 }
 
+// --- keepalive: connect() must enable TCP keepalive on the socket ----------
+// Regression guard for the silent sleep/resume hang. A MU* session is idle for
+// long stretches by design, so with keepalive off there is nothing to make a
+// vanished peer observable: the socket keeps looking connected, 'close' never
+// fires, and the main process's auto-reconnect never gets a chance to run.
+// Spies on net.Socket.prototype (TLSSocket inherits from it, so one spy covers
+// both the plaintext and TLS paths) while still driving a real connection.
+async function testKeepAliveEnabledOnConnect() {
+  const server = makeEchoServer();
+  await listen(server);
+  const port = server.address().port;
+
+  const originalSetKeepAlive = net.Socket.prototype.setKeepAlive;
+  const calls = [];
+  net.Socket.prototype.setKeepAlive = function spySetKeepAlive(...args) {
+    calls.push(args);
+    return originalSetKeepAlive.apply(this, args);
+  };
+
+  let conn = null;
+  try {
+    conn = createConnection({ host: '127.0.0.1', port, charset: 'utf8' });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('timeout waiting for connect')), 3000);
+      conn.on('connect', () => { clearTimeout(timer); resolve(); });
+      conn.on('error', (err) => { clearTimeout(timer); reject(err); });
+      conn.connect();
+    });
+  } finally {
+    net.Socket.prototype.setKeepAlive = originalSetKeepAlive;
+  }
+
+  const enabling = calls.filter((args) => args[0] === true && typeof args[1] === 'number' && args[1] > 0);
+  check('keepalive: connect() calls setKeepAlive(true, <positive delay>)', enabling.length >= 1);
+
+  if (conn) conn.disconnect();
+  await close(server);
+}
+
 async function runAsyncTests() {
   await testBogusCharsetDoesNotCrash();
   await testValidUtf8CharsetUnaffected();
   await testGracefulDisconnectStillCloses();
+  await testKeepAliveEnabledOnConnect();
 }
 
 runAsyncTests()

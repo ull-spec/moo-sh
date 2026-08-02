@@ -15,7 +15,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app, Menu, ipcMain, shell } = require('electron');
+const { app, Menu, ipcMain, powerMonitor, shell } = require('electron');
 
 const { createConnection } = require('./connection');
 const { createRouter } = require('./router');
@@ -28,6 +28,7 @@ const { ROLES } = require('../common/line-types');
 const { stripAnsi } = require('../common/ansi');
 const { isSafeExternalUrl } = require('../common/url-safety');
 const profileStore = require('./profile-store');
+const routingLegacy = require('./routing-legacy');
 const settingsStore = require('./settings-store');
 const storage = require('./storage');
 
@@ -95,16 +96,22 @@ let socketUp = false;
 // Pending setInterval handle for the anti-idle keepalive, or null if none is
 // running. See startAntiIdle()/stopAntiIdle().
 let antiIdleTimer = null;
-// Blank command cadence while connected, so the MUSH's own idle-timeout logic
-// never fires during a long AFK stretch. A blank line is a silent no-op on
-// PennMUSH/TinyMUSH/RhostMUSH-family servers (no output, no pose) but still
-// counts as input, which is what resets the per-connection idle clock.
+// Keepalive command cadence while connected, so the server's own idle-timeout
+// logic never fires during a long AFK stretch. A single space is a silent
+// no-op on PennMUSH/TinyMUSH/RhostMUSH-family servers (no output, no pose)
+// but still counts as input, which is what resets the per-connection idle
+// clock. Deliberately NOT a truly empty line: this is now an opt-in toggle a
+// user can point at any host:port (not just MUSH-family servers), and some
+// non-MUSH codebases treat a zero-length line as "repeat my last command" —
+// a genuinely blank send could silently resubmit something during an AFK
+// stretch. A single space is non-empty input everywhere while still reading
+// as blank to a human.
 const ANTI_IDLE_INTERVAL_MS = 10 * 60 * 1000;
 
 function startAntiIdle() {
   if (antiIdleTimer) return;
   antiIdleTimer = setInterval(() => {
-    if (connection) connection.send('');
+    if (connection) connection.send(' ');
   }, ANTI_IDLE_INTERVAL_MS);
   // Never by itself keep the process alive — same discipline as
   // reconnectTimer/historyPersist's debounce timer.
@@ -153,6 +160,12 @@ function startSession(id, loginName) {
     historyPersist.load();
 
     // selfNames tells the router which name in a group page's recipient list is
+    // YOU. It used to fall back to the active LOGIN name, which is literally
+    // "Default" on most profiles and so matched nobody, silently splitting
+    // every group conversation across two tabs. profile-store now normalizes
+    // the profile's own selfNames and, when it has none, seeds them from the
+    // login command's character name; the login name stays as a last resort
+    // for a profile with neither.
     // YOU, so the incoming side ("(To: Carol Doe(cd) and Niaj(nj))
     // Peggy(peg) pages: ...") and the outgoing echo ("You paged Peggy and
     // Niaj with '...'") collapse to ONE window instead of two. It defaults to
@@ -162,7 +175,10 @@ function startSession(id, loginName) {
     // login's character is known by more than one name).
     router = createRouter(profile.routingRules || [], {
       channelAliases: profile.channelAliases || {},
-      selfNames: Array.isArray(profile.selfNames) ? profile.selfNames : activeLoginName,
+      selfNames:
+        Array.isArray(profile.selfNames) && profile.selfNames.length > 0
+          ? profile.selfNames
+          : activeLoginName,
       onWarning: (msg) => toFeed('feed:system', `* ${msg}`),
     });
 
@@ -172,7 +188,7 @@ function startSession(id, loginName) {
     pendingConnect = true;
     // Create the feed window BEFORE closing Connect so the app never transiently
     // has zero windows (which would trigger window-all-closed -> quit).
-    wm.createFeedWindow({ profileName: profile.name });
+    wm.createFeedWindow({ profileName: profile.name, color: profile.color });
     wm.closeConnectWindow();
   } catch (err) {
     // Reset all module-level session state back to a clean pre-session slate
@@ -347,6 +363,41 @@ function cancelReconnect() {
   reconnectTimer = null;
 }
 
+// Waking from sleep is the one moment we KNOW the socket is suspect: the
+// network interface went down while we were out and any NAT mapping along the
+// path has probably expired, but nothing informs the local socket — it sits
+// there looking connected. TCP keepalive (see connection.js) does eventually
+// fail it for real, but only after the OS finishes its whole probe sequence,
+// which is minutes. So treat resume as evidence and act immediately, rather
+// than waiting for a probe to time out.
+//
+// This does not bypass the reconnect machinery, it feeds it: a live-looking
+// session is torn down so the existing 'close' handler runs, and because this
+// was never an intentional disconnect that handler calls scheduleReconnect()
+// exactly as it does for a server-side drop.
+function handleSystemResume() {
+  // No session yet (still on the Connect window), or the user disconnected on
+  // purpose before sleeping — either way, resuming is not our business.
+  if (!connection || intentionalDisconnect) return;
+
+  if (socketUp) {
+    toFeed('feed:system', '* System resumed from sleep — verifying connection...');
+    // Deliberately NOT doDisconnect(): that would set intentionalDisconnect
+    // and suppress the retry. Dropping the socket directly leaves the flag
+    // false, so 'close' treats this like any other unrequested drop.
+    connection.disconnect();
+    return;
+  }
+
+  // Not connected. Any retry scheduled before we slept is now of unknown age
+  // (timers do not run while suspended), so replace it with an attempt now.
+  // Harmless if a connect is already in flight — connect() no-ops when a
+  // socket already exists.
+  cancelReconnect();
+  toFeed('feed:system', '* System resumed from sleep — reconnecting...');
+  connection.connect();
+}
+
 function doConnect() {
   intentionalDisconnect = false;
   cancelReconnect();
@@ -474,8 +525,54 @@ function init() {
 // Connect window asks for the list of discovered profiles (display-only data;
 // discovery + the real-over-example preference live in main, never the
 // renderer). Each profile's logins[] is included so the Character dropdown
-// and login field can be pre-filled.
-ipcMain.handle('connect:list-profiles', () => profileStore.discoverProfiles(profilesDir()));
+// and login field can be pre-filled. discoverProfiles itself stays alphabetical
+// and order-unaware (see profile-store.js); the user's persisted worldOrder is
+// applied here as a thin wrapper so the Connect window's list survives a
+// drag-and-drop reorder across restarts. A corrupt/unreadable settings.json
+// must never break the Connect window's world list, so this degrades to the
+// plain alphabetical list on any failure (loadSettings already falls back to
+// DEFAULTS on a parse error, but the try/catch is cheap belt-and-suspenders
+// against anything else going wrong here).
+ipcMain.handle('connect:list-profiles', () => {
+  const discovered = profileStore.discoverProfiles(profilesDir());
+  try {
+    const settings = settingsStore.loadSettings(settingsFile());
+    return profileStore.orderProfiles(discovered, settings.worldOrder);
+  } catch (err) {
+    return discovered;
+  }
+});
+
+// Connect window persists a new drag-and-drop world ordering. App-wide (not
+// per-profile) — see settings-store.js's worldOrder comment. Never broadcasts
+// settings:changed: the only reader is the Connect window that just set it
+// (it already holds the order in memory), and a broadcast would make the
+// Feed/Settings windows re-apply theme for no reason.
+ipcMain.handle('connect:set-profile-order', (_event, ids) => {
+  const current = (() => {
+    try {
+      return settingsStore.loadSettings(settingsFile()).worldOrder;
+    } catch (err) {
+      return [];
+    }
+  })();
+  if (!Array.isArray(ids)) return current;
+
+  // Same guard connect:go applies to a single id: DevTools is reachable from
+  // every window's Debug menu, so a crafted id could otherwise land in
+  // settings.json and later be compared against real profile ids in
+  // orderProfiles. Keeping the stored file free of junk is cheap.
+  const cleaned = ids.filter((id) => typeof id === 'string' && SAFE_PROFILE_ID_RE.test(id));
+
+  try {
+    const merged = settingsStore.updateSettings(settingsFile(), { worldOrder: cleaned });
+    return merged.worldOrder;
+  } catch (err) {
+    // Write failed (e.g. unwritable userData dir); the order just won't
+    // survive a restart.
+    return current;
+  }
+});
 
 // User clicked Connect in the Connect window. Persist the (possibly edited)
 // login string to the real profile file, then start the session. The login
@@ -577,6 +674,113 @@ ipcMain.handle('profile:set-anti-idle', (_event, value) => {
   return v;
 });
 
+// Routing is per-profile for the same reason anti-idle is, and scoped to the
+// active session's `profile` for the same reason too: both are only ever
+// touched from the Settings window, which can only be open during a session.
+//
+// `customized` is loadProfile's runtime marker — true when this world's rules
+// match no preset generation, i.e. they were hand-edited and the loader's
+// automatic migration deliberately left them alone. That is exactly the case
+// the reset button below exists for, so it also drives whether the Settings
+// window shows its notice.
+ipcMain.handle('profile:get-routing', () => ({
+  customized: !!(profile && profile.__routingCustomized),
+  selfNames: (profile && Array.isArray(profile.selfNames) ? profile.selfNames : []).slice(),
+  // True when the names above are only INFERRED from the login command, not
+  // stored on disk. The Settings window shows an inferred value the same way
+  // it shows a stored one, but must not write it back unless the user actually
+  // edits the field — persisting a guess freezes it, and a world with several
+  // named logins would then keep using the wrong character's name after
+  // reconnecting as somebody else. See profile-store's stripRuntimeFields.
+  selfNamesInferred: !!(profile && profile.__selfNamesInferred),
+  // The login-name fallback index.js applies when selfNames is empty, shown to
+  // the user as the field's placeholder so "empty" isn't silently ambiguous.
+  loginName: activeLoginName || '',
+}));
+
+// Explicit, user-driven reset. Applied LIVE via router.setRules rather than
+// requiring a reconnect: the rule set is the router's only state, so swapping
+// it is safe mid-session and the user gets to see the fix work immediately —
+// which is the whole point, given the original bug was that a fix silently
+// never reached the running app.
+ipcMain.handle('profile:reset-routing-rules', () => {
+  if (!profile) return false;
+  try {
+    const merged = profileStore.resetRoutingRules(profilesDir(), profile.id);
+    profile.routingRules = merged.routingRules;
+    profile.routingRulesVersion = merged.routingRulesVersion;
+    profile.__routingCustomized = false;
+  } catch (err) {
+    // Profile file unwritable: fall through and still refresh the LIVE router
+    // below, so this session is fixed even if the change can't be persisted.
+    profile.routingRules = routingLegacy.currentRulesClone();
+    profile.__routingCustomized = false;
+  }
+  if (router && typeof router.setRules === 'function') {
+    router.setRules(profile.routingRules);
+  }
+  return true;
+});
+
+// Same live-apply discipline as the reset above (router.setSelfNames), so a
+// corrected character name takes effect on the very next page rather than at
+// the next reconnect. Normalization is profile-store's job, and the value it
+// actually stored is returned so the renderer can reconcile its field against
+// what was really written.
+ipcMain.handle('profile:set-self-names', (_event, value) => {
+  if (!profile) return [];
+  const normalized = profileStore.normalizeSelfNames(value);
+  profile.selfNames = normalized;
+  // This is the one path that turns a guess into the user's stated choice, so
+  // it clears the inferred marker: from here on the value is written like any
+  // other profile field and is never re-inferred on load.
+  profile.__selfNamesInferred = false;
+  try {
+    profileStore.setSelfNames(profilesDir(), profile.id, normalized);
+  } catch (err) {
+    // In-memory value still governs this session even if it can't be persisted.
+  }
+  if (router && typeof router.setSelfNames === 'function') {
+    router.setSelfNames(normalized.length > 0 ? normalized : activeLoginName);
+  }
+  return normalized;
+});
+
+// Per-profile color, addressed BY PROFILE ID rather than the active session's
+// `profile` module variable (unlike anti-idle above). Anti-idle is only ever
+// toggled from the Settings window DURING a session, so `profile` is
+// guaranteed non-null there. Colors are chosen in the Connect window BEFORE
+// any session exists, so at that moment `profile` is still null and a
+// session-scoped handler would be a silently dead feature. Hence: look the
+// profile up on disk by id, and only ALSO touch the in-memory `profile` if a
+// session for that same id happens to be running (so a running session's
+// color stays in sync without requiring a reload if this is ever also called
+// from the Settings window later).
+ipcMain.handle('profile:set-color', (_event, payload) => {
+  const id = payload && typeof payload.id === 'string' ? payload.id : '';
+  if (!id || !SAFE_PROFILE_ID_RE.test(id)) return null;
+
+  const rawColor = payload ? payload.color : null;
+  let normalized;
+  if (rawColor === null || rawColor === undefined) {
+    normalized = null;
+  } else if (typeof rawColor === 'string' && profileStore.isHexColor(rawColor)) {
+    normalized = rawColor;
+  } else {
+    return null; // invalid input is a no-op, matching setColor's own contract
+  }
+
+  try {
+    profileStore.setColor(profilesDir(), id, normalized);
+  } catch (err) {
+    return null; // e.g. profile vanished or dir unwritable
+  }
+
+  if (profile && profile.id === id) profile.color = normalized;
+
+  return normalized;
+});
+
 // Atomic, disk-fresh roster append — see appendSoundRosterEntry's comment in
 // settings-store.js for why this exists instead of the Feed window sending a
 // full (and possibly stale) `sound` object like Settings does.
@@ -617,6 +821,8 @@ ipcMain.on('renderer:ready', () => {
     role: ROLES.FEED,
     target: null,
     profileName: profile.name,
+    // loadProfile already guarantees this is a validated #rrggbb hex or null.
+    color: profile.color || null,
   });
   toFeed(
     'feed:system',
@@ -632,6 +838,21 @@ ipcMain.on('renderer:ready', () => {
       poseLog.isEnabled()
         ? '* Pose log is ON.'
         : '* Pose log is OFF. Use Connection > Pose log to start recording poses.'
+    );
+  }
+  // Stock routing rules are silently migrated to the current preset by
+  // profile-store's loader, so there is nothing to say about them. Hand-edited
+  // ones are never touched automatically, which means a world can sit on rules
+  // that predate the multi-word-name fix indefinitely without any visible
+  // symptom beyond pages quietly landing in the feed. Say so once per session,
+  // in the same system-line channel as the capture/pose-log status above,
+  // rather than adding a new always-present piece of UI chrome.
+  if (profile.__routingCustomized) {
+    toFeed(
+      'feed:system',
+      '* This world has customized routing rules that predate the multi-word ' +
+        'name fix, so pages from names like "Bob Roe" may land in the feed ' +
+        'instead of their own tab. Settings > Reset routing rules to defaults.'
     );
   }
   toFeed('feed:system', '* Use Connection > Connect (Ctrl+K) to connect.');
@@ -690,11 +911,15 @@ ipcMain.on('find:stop', (_event, action) => {
 app.whenReady().then(() => {
   init();
 
+  // powerMonitor is only usable once the app is ready, so it is wired here
+  // rather than at module scope.
+  powerMonitor.on('resume', handleSystemResume);
+
   app.on('activate', () => {
     // Only recreate the feed window once a session exists; before that the
     // Connect window is the active surface.
     if (profile && wm && !wm.getFeedWindow()) {
-      wm.createFeedWindow({ profileName: profile.name });
+      wm.createFeedWindow({ profileName: profile.name, color: profile.color });
     }
   });
 });

@@ -28,6 +28,11 @@
                    placeholder="New character name" hidden>
           </div>
           <div class="field">
+            <label>Window color</label>
+            <div id="color-swatches" class="swatch-row" role="radiogroup" aria-label="Window color"></div>
+            <div class="hint">Tints this world's window so you can tell several open windows apart.</div>
+          </div>
+          <div class="field">
             <label for="login">Login / connect string</label>
             <input id="login" type="password" autocomplete="off" spellcheck="false"
                    placeholder="e.g. connect &lt;character&gt; &lt;password&gt;">
@@ -66,6 +71,11 @@
               Allow self-signed / unverified certificate (insecure)
             </label>
           </div>
+          <div class="field">
+            <label>Window color</label>
+            <div id="nw-color-swatches" class="swatch-row" role="radiogroup" aria-label="Window color"></div>
+            <div class="hint">Tints this world's window so you can tell several open windows apart.</div>
+          </div>
           <div id="nw-error" class="hint error" hidden></div>
           <div class="hint">A new profile is saved locally when you connect.</div>
         </div>
@@ -77,6 +87,6 @@
       </div>
     </div>
   </div>
-  <script src="connect.js"></script>
+  <script type="module" src="connect.js"></script>
 </body>
 </html>

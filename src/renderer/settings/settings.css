@@ -114,6 +114,61 @@ input[type="color"] {
   background: var(--border);
 }
 
+/* --- self names + message routing fields ------------------------------------------ */
+
+#self-names {
+  width: 100%;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  outline: none;
+  padding: 8px 10px;
+}
+
+#self-names:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Only rendered when this world's routing rules were hand-edited and so were
+   skipped by the automatic migration — an accent-edged block rather than
+   another .hint, so it reads as "something needs your attention" instead of
+   as more of the surrounding explanatory text. */
+.notice {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--input-bg);
+  color: var(--fg);
+  font-size: calc(var(--font-size) - 1px);
+  line-height: 1.5;
+}
+
+#btn-reset-routing {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  padding: 8px 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+#btn-reset-routing:hover {
+  background: var(--border);
+}
+
+#btn-reset-routing[disabled] {
+  cursor: default;
+  color: var(--fg-muted);
+}
+
 /* --- sound notifications field ---------------------------------------------------- */
 
 .sound-toggle-row {

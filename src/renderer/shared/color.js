@@ -26,3 +26,22 @@ export const DEFAULT_COLORS = {
 export function isHexColor(value) {
   return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value);
 }
+
+// Curated preset swatches for per-world color coding (deliberately a fixed
+// palette, not a free-form picker — the user explicitly chose this). Each hex
+// is picked to stay legible against the app's dark `bg` (#12141a above) and to
+// stay clear of the default `accent` (#5fb3ff) so a world's color dot is never
+// confused with the UI's own selection highlight. "No color" is represented
+// as null, rendered by the UI as a separate clear/none control rather than as
+// a palette entry here.
+export const PROFILE_COLORS = [
+  { hex: '#ff6b6b', name: 'Red' },
+  { hex: '#f0883e', name: 'Orange' },
+  { hex: '#e3c14e', name: 'Amber' },
+  { hex: '#6fcf7f', name: 'Green' },
+  { hex: '#35c8b0', name: 'Teal' },
+  { hex: '#a98bff', name: 'Violet' },
+  { hex: '#ef78c8', name: 'Pink' },
+  { hex: '#c08b5c', name: 'Tan' },
+  { hex: '#d8dee9', name: 'Silver' },
+];

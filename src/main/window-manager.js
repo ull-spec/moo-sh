@@ -18,13 +18,61 @@
  */
 
 const path = require('path');
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, nativeImage } = require('electron');
 const { ROLES } = require('../common/line-types');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 const FEED_HTML = path.join(__dirname, '..', 'renderer', 'feed', 'index.html');
 const CONNECT_HTML = path.join(__dirname, '..', 'renderer', 'connect', 'index.html');
 const SETTINGS_HTML = path.join(__dirname, '..', 'renderer', 'settings', 'index.html');
+
+// Reimplemented locally rather than imported: window-manager.js is CommonJS
+// main-process code and must not pull in the renderer's ES-module color
+// utilities (there is precedent for this same reimplementation in
+// profile-store.js, which also can't import renderer code).
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+// Build a small solid-color square nativeImage for a per-window icon, or null
+// if `hex` isn't a valid #rrggbb (including no color at all). No new
+// dependency: a 32x32 flat-color bitmap is built by hand in a Buffer.
+//
+// Byte order is BGRA, NOT RGBA: nativeImage.createFromBuffer with an explicit
+// width/height interprets the buffer as Chromium's native N32 bitmap format,
+// which is BGRA on every little-endian platform this app targets. Writing
+// RGBA here would swap red and blue, so e.g. '#ff6b6b' (a warm red) would
+// render as blue. Alpha is 255 everywhere, so premultiplied-vs-straight alpha
+// never comes up.
+//
+// Platform reality, stated plainly rather than silently dropped: per-window
+// icons are honored on X11 and Windows, but Wayland has no per-window-icon
+// protocol at all (a Wayland compositor derives the taskbar/switcher icon from
+// the app's .desktop file via app_id, not anything the app sets at runtime),
+// so under a Wayland session this call is a no-op. The in-window accent strip
+// and the Connect-window color dot are the cues that work regardless of
+// windowing system — this icon is a bonus on the platforms that support it,
+// not the only signal.
+function solidColorIcon(hex) {
+  if (typeof hex !== 'string' || !HEX_COLOR_RE.test(hex)) return null;
+
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+
+  const size = 32;
+  const buf = Buffer.alloc(size * size * 4);
+  for (let i = 0; i < buf.length; i += 4) {
+    buf[i] = b;
+    buf[i + 1] = g;
+    buf[i + 2] = r;
+    buf[i + 3] = 255;
+  }
+
+  try {
+    return nativeImage.createFromBuffer(buf, { width: size, height: size });
+  } catch (err) {
+    return null; // a failed icon must never prevent the feed window opening
+  }
+}
 
 function createWindowManager() {
   // windowId -> { role, target }
@@ -126,7 +174,7 @@ function createWindowManager() {
     if (w && !w.isDestroyed()) w.close();
   }
 
-  function createFeedWindow({ profileName }) {
+  function createFeedWindow({ profileName, color }) {
     const win = new BrowserWindow({
       width: 1100,
       height: 760,
@@ -139,6 +187,14 @@ function createWindowManager() {
         sandbox: true,
       },
     });
+
+    // Applied post-creation (not via the constructor's `icon` option) so a
+    // bad/missing color can never affect window construction itself. No-op on
+    // macOS (setIcon isn't a function there) and on Wayland (see
+    // solidColorIcon's comment) — skipped entirely when there's no color so
+    // the default app-icon behavior is unchanged.
+    const icon = solidColorIcon(color);
+    if (icon && typeof win.setIcon === 'function') win.setIcon(icon);
 
     const entry = { role: ROLES.FEED, target: null };
     registry.set(win.id, entry);
