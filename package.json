@@ -1,6 +1,6 @@
 {
   "name": "moo-sh",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Cross-platform Electron MU*/MUSH/MUD client with a Discord-like multi-window layout, ANSI rendering, optional TLS, and desktop + sound notifications.",
   "main": "src/main/index.js",
   "scripts": {

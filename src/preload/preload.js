@@ -43,8 +43,9 @@
  *                    sorted into the user's persisted worldOrder; worlds not
  *                    yet ordered trail alphabetically after the ordered ones)
  *     'connect:go'   payload { id, loginName, autoLoginCommand }  (existing world)
- *                 or payload { newWorld:{name,host,port,charset,tls,tlsAllowInsecure,color}, loginName, autoLoginCommand }
- *                    (create + connect a brand-new world)
+ *                 or payload { newWorld:{name,host,port,charset,tls,tlsAllowInsecure,color,routingPreset}, loginName, autoLoginCommand }
+ *                    (create + connect a brand-new world; routingPreset is
+ *                    'mush' or 'evennia', defaulting to 'mush')
  *     'connect:set-profile-order' (invoke) payload array of profile-id strings
  *                    -> the persisted array (app-wide Worlds-list order; see
  *                    settings-store.js's worldOrder)
@@ -74,13 +75,21 @@
  *     'profile:set-anti-idle' (invoke) payload boolean -> the boolean applied
  *                 (per-profile, scoped to the active session; see
  *                 profile-store.js's setAntiIdle)
- *     'profile:get-routing' (invoke) -> { customized, selfNames, loginName }
+ *     'profile:get-routing' (invoke) -> { customized, routingPreset, selfNames, loginName }
  *                 (per-profile; `customized` means this world's routing rules
  *                 were hand-edited and so were NOT auto-migrated to the current
- *                 preset, which is what the reset action below is for)
+ *                 preset, which is what the reset action below is for;
+ *                 `routingPreset` is 'mush' or 'evennia', absent on disk
+ *                 normalized to 'mush')
  *     'profile:reset-routing-rules' (invoke) -> boolean (writes the current
  *                 preset over this profile's routingRules, leaving every other
  *                 profile field untouched, and live-applies it to the router)
+ *     'profile:set-routing-preset' (invoke) payload 'mush'|'evennia' -> the
+ *                 preset actually applied (per-profile; switches which rule
+ *                 set a world uses, always replacing routingRules with that
+ *                 preset's current defaults, and live-applies it to the router;
+ *                 an unrecognised value is a no-op that returns the current
+ *                 preset unchanged)
  *     'profile:set-self-names' (invoke) payload string|string[] -> the
  *                 normalized string[] actually stored (your own character
  *                 name(s), used to keep both sides of a group page in one tab)
@@ -163,6 +172,7 @@ contextBridge.exposeInMainWorld('mush', {
         // malformed (falls back to null), so duplicating that check here
         // would just be a second place to keep in sync.
         color: typeof nw.color === 'string' ? nw.color : null,
+        routingPreset: nw.routingPreset === 'evennia' ? 'evennia' : 'mush',
       };
     }
     ipcRenderer.send('connect:go', msg);
@@ -191,6 +201,8 @@ contextBridge.exposeInMainWorld('mush', {
   // Per-profile routing, scoped to the active session like anti-idle above.
   getProfileRouting: () => ipcRenderer.invoke('profile:get-routing'),
   resetProfileRoutingRules: () => ipcRenderer.invoke('profile:reset-routing-rules'),
+  setProfileRoutingPreset: (preset) =>
+    ipcRenderer.invoke('profile:set-routing-preset', preset === 'evennia' ? 'evennia' : 'mush'),
   setProfileSelfNames: (names) =>
     ipcRenderer.invoke(
       'profile:set-self-names',

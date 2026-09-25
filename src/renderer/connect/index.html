@@ -63,6 +63,14 @@
             </select>
           </div>
           <div class="field">
+            <label for="nw-server-type">Server type</label>
+            <select id="nw-server-type">
+              <option value="mush" selected>MUSH family (PennMUSH / TinyMUX / Rhost)</option>
+              <option value="evennia">Evennia</option>
+            </select>
+            <div class="hint">Decides how pages, channels and (on Evennia) texts are sorted into tabs. Can be changed later in Settings.</div>
+          </div>
+          <div class="field">
             <label for="nw-tls"><input id="nw-tls" type="checkbox"> Use TLS (SSL)</label>
           </div>
           <div class="field" id="nw-tls-insecure-field" hidden>

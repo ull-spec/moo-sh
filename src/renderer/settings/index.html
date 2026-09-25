@@ -39,9 +39,14 @@
     </div>
     <div class="field">
       <label>Message routing</label>
+      <label for="server-type">Server type</label>
+      <select id="server-type">
+        <option value="mush">MUSH family (PennMUSH / TinyMUX / Rhost)</option>
+        <option value="evennia">Evennia</option>
+      </select>
       <div id="routing-notice" class="notice" hidden></div>
       <button id="btn-reset-routing" type="button">Reset routing rules to defaults</button>
-      <div class="hint">Restores this world's page/channel rules to the client's current defaults. Nothing else about the world changes.</div>
+      <div class="hint">Server type decides how pages, channels and (on Evennia) texts are sorted into tabs. Reset restores this world's page/channel rules to the current defaults for its server type. Nothing else about the world changes.</div>
     </div>
     <div class="field">
       <label>Sound notifications</label>

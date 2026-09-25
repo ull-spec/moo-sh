@@ -685,6 +685,10 @@ ipcMain.handle('profile:set-anti-idle', (_event, value) => {
 // window shows its notice.
 ipcMain.handle('profile:get-routing', () => ({
   customized: !!(profile && profile.__routingCustomized),
+  // Which preset this world uses (absent on disk means 'mush'), so the
+  // Settings window can show the right control and compare it against
+  // whatever the user stages there.
+  routingPreset: routingLegacy.normalizePresetId(profile && profile.routingPreset),
   selfNames: (profile && Array.isArray(profile.selfNames) ? profile.selfNames : []).slice(),
   // True when the names above are only INFERRED from the login command, not
   // stored on disk. The Settings window shows an inferred value the same way
@@ -713,13 +717,48 @@ ipcMain.handle('profile:reset-routing-rules', () => {
   } catch (err) {
     // Profile file unwritable: fall through and still refresh the LIVE router
     // below, so this session is fixed even if the change can't be persisted.
-    profile.routingRules = routingLegacy.currentRulesClone();
+    profile.routingRules = routingLegacy.currentRulesClone(profile.routingPreset);
     profile.__routingCustomized = false;
   }
   if (router && typeof router.setRules === 'function') {
     router.setRules(profile.routingRules);
   }
   return true;
+});
+
+// Explicit, user-driven switch between the MUSH-family and Evennia routing
+// presets. Only the two known preset strings are accepted from the renderer;
+// anything else is a no-op that just reports back whatever preset is
+// currently in effect, same defensive stance as every other IPC handler here.
+// Unlike the reset above, this ALWAYS replaces the rule set (see
+// profileStore.setRoutingPreset) — switching a world's server family means
+// its old rules describe the wrong server entirely, so there is nothing of
+// the user's worth preserving, hand-edited or not. Live-applied via
+// router.setRules the same way the reset is, for the same reason.
+ipcMain.handle('profile:set-routing-preset', (_event, value) => {
+  if (!profile) return 'mush';
+  if (value !== 'mush' && value !== 'evennia') {
+    return routingLegacy.normalizePresetId(profile.routingPreset);
+  }
+  try {
+    const merged = profileStore.setRoutingPreset(profilesDir(), profile.id, value);
+    if (value === 'evennia') profile.routingPreset = 'evennia';
+    else delete profile.routingPreset;
+    profile.routingRules = merged.routingRules;
+    profile.routingRulesVersion = merged.routingRulesVersion;
+    profile.__routingCustomized = false;
+  } catch (err) {
+    // Profile file unwritable: fall through and still refresh the LIVE router
+    // below, so this session reflects the switch even if it can't be persisted.
+    if (value === 'evennia') profile.routingPreset = 'evennia';
+    else delete profile.routingPreset;
+    profile.routingRules = routingLegacy.currentRulesClone(value);
+    profile.__routingCustomized = false;
+  }
+  if (router && typeof router.setRules === 'function') {
+    router.setRules(profile.routingRules);
+  }
+  return routingLegacy.normalizePresetId(profile.routingPreset);
 });
 
 // Same live-apply discipline as the reset above (router.setSelfNames), so a
@@ -848,11 +887,16 @@ ipcMain.on('renderer:ready', () => {
   // in the same system-line channel as the capture/pose-log status above,
   // rather than adding a new always-present piece of UI chrome.
   if (profile.__routingCustomized) {
+    const preset = routingLegacy.normalizePresetId(profile.routingPreset);
     toFeed(
       'feed:system',
-      '* This world has customized routing rules that predate the multi-word ' +
-        'name fix, so pages from names like "Bob Roe" may land in the feed ' +
-        'instead of their own tab. Settings > Reset routing rules to defaults.'
+      preset === 'evennia'
+        ? '* This world has customized routing rules, so they were left as ' +
+            'they are. Settings > Reset routing rules to defaults restores ' +
+            'the Evennia defaults.'
+        : '* This world has customized routing rules that predate the multi-word ' +
+            'name fix, so pages from names like "Bob Roe" may land in the feed ' +
+            'instead of their own tab. Settings > Reset routing rules to defaults.'
     );
   }
   toFeed('feed:system', '* Use Connection > Connect (Ctrl+K) to connect.');

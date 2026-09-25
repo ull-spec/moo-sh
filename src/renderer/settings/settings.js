@@ -20,6 +20,7 @@ const fontSelectEl = document.getElementById('font-select');
 const resetColorsBtn = document.getElementById('btn-reset-colors');
 const antiIdleEl = document.getElementById('anti-idle');
 const selfNamesEl = document.getElementById('self-names');
+const serverTypeEl = document.getElementById('server-type');
 const routingNoticeEl = document.getElementById('routing-notice');
 const resetRoutingBtn = document.getElementById('btn-reset-routing');
 const soundPageEl = document.getElementById('sound-page');
@@ -50,8 +51,14 @@ let antiIdleState = false;
 // performs it. Resetting immediately on click would break the window's
 // Cancel-means-nothing-happened contract for the one action here that can't be
 // undone by reloading from disk.
-let routingState = { customized: false, selfNames: [], inferred: false, loginName: '' };
+let routingState = { customized: false, routingPreset: 'mush', selfNames: [], inferred: false, loginName: '' };
 let routingResetArmed = false;
+
+// The <select>'s staged value, kept separate from routingState.routingPreset
+// (what load() actually fetched) so renderRouting can tell "about to switch"
+// from "already this preset" and Cancel can revert to the loaded value —
+// same staged-vs-loaded split every other control in this window uses.
+let stagedRoutingPreset = 'mush';
 
 // Exact text load() put in the self-names field, so Confirm can tell an
 // untouched field from an edited one. Confirm must NOT write back an untouched
@@ -157,24 +164,51 @@ function renderSelfNamesField() {
     : '';
 }
 
+function presetLabel(preset) {
+  return preset === 'evennia' ? 'Evennia' : 'MUSH family';
+}
+
+// Priority order for the notice: a staged server-type switch always takes
+// precedence over the reset/customized states below it, because confirming a
+// switch discards whatever those would otherwise warn about or fix — see
+// confirmChanges, which performs the switch INSTEAD of a pending reset, never
+// both.
 function renderRouting() {
+  const presetChanged = stagedRoutingPreset !== routingState.routingPreset;
   if (resetRoutingBtn) {
-    resetRoutingBtn.disabled = routingResetArmed;
+    // Switching server type already replaces the rules with fresh defaults,
+    // so resetting on top of that is redundant — disable it while a switch
+    // is staged rather than leaving two controls that both claim to do the
+    // same thing on Confirm.
+    resetRoutingBtn.disabled = routingResetArmed || presetChanged;
     resetRoutingBtn.textContent = routingResetArmed
       ? 'Will reset on Confirm'
       : 'Reset routing rules to defaults';
   }
   if (!routingNoticeEl) return;
-  if (routingResetArmed) {
+  if (presetChanged && routingState.customized) {
+    routingNoticeEl.hidden = false;
+    routingNoticeEl.textContent =
+      "This world's routing rules were customized. Switching the server type will replace them with the " +
+      presetLabel(stagedRoutingPreset) + ' defaults when you press Confirm.';
+  } else if (presetChanged) {
+    routingNoticeEl.hidden = false;
+    routingNoticeEl.textContent =
+      'Page and channel routing will switch to the ' + presetLabel(stagedRoutingPreset) +
+      ' defaults when you press Confirm.';
+  } else if (routingResetArmed) {
     routingNoticeEl.hidden = false;
     routingNoticeEl.textContent =
       'Routing rules for this world will be replaced with the current defaults when you press Confirm.';
   } else if (routingState.customized) {
     routingNoticeEl.hidden = false;
     routingNoticeEl.textContent =
-      "This world's routing rules were customized and predate the multi-word name fix, " +
-      'so they were left as they are. Pages from names like "Bob Roe" may land in the ' +
-      'main feed instead of their own tab until you reset them.';
+      routingState.routingPreset === 'evennia'
+        ? "This world's routing rules were customized, so they were left as they are. " +
+          'Reset routing rules to defaults restores the Evennia defaults.'
+        : "This world's routing rules were customized and predate the multi-word name fix, " +
+          'so they were left as they are. Pages from names like "Bob Roe" may land in the ' +
+          'main feed instead of their own tab until you reset them.';
   } else {
     routingNoticeEl.hidden = true;
     routingNoticeEl.textContent = '';
@@ -272,14 +306,19 @@ async function load() {
       const routing = await window.mush.getProfileRouting();
       routingState = {
         customized: !!(routing && routing.customized),
+        routingPreset: (routing && routing.routingPreset) === 'evennia' ? 'evennia' : 'mush',
         selfNames: Array.isArray(routing && routing.selfNames) ? routing.selfNames : [],
         inferred: !!(routing && routing.selfNamesInferred),
         loginName: (routing && routing.loginName) || '',
       };
     } catch (e) {
-      routingState = { customized: false, selfNames: [], inferred: false, loginName: '' };
+      routingState = { customized: false, routingPreset: 'mush', selfNames: [], inferred: false, loginName: '' };
     }
   }
+  // Cancel is a true revert for the server-type select too: staged always
+  // starts back at whatever was actually loaded.
+  stagedRoutingPreset = routingState.routingPreset;
+  if (serverTypeEl) serverTypeEl.value = stagedRoutingPreset;
   renderSelfNamesField();
   renderRouting();
 }
@@ -341,10 +380,27 @@ async function confirmChanges() {
       antiIdleState = await window.mush.setProfileAntiIdle(antiIdleState);
       if (antiIdleEl) antiIdleEl.checked = antiIdleState;
     }
-    // Per-profile routing, same as anti-idle. Ordered AFTER the reset so a
-    // single Confirm that does both ends with the user's names applied on top
-    // of the freshly-reset rules.
-    if (routingResetArmed && window.mush && typeof window.mush.resetProfileRoutingRules === 'function') {
+    // Per-profile routing, same as anti-idle. A staged server-type switch and
+    // an armed reset are mutually exclusive on Confirm — switching already
+    // replaces the rules with that preset's fresh defaults, so there is
+    // nothing left for a reset to do (see renderRouting, which disables the
+    // reset button while a switch is staged). Either one runs BEFORE the
+    // self-names write below, so a single Confirm that also edits self-names
+    // ends with the user's names applied on top of the freshly-set rules.
+    if (
+      stagedRoutingPreset !== routingState.routingPreset &&
+      window.mush &&
+      typeof window.mush.setProfileRoutingPreset === 'function'
+    ) {
+      const applied = await window.mush.setProfileRoutingPreset(stagedRoutingPreset);
+      routingState = {
+        ...routingState,
+        routingPreset: applied === 'evennia' ? 'evennia' : 'mush',
+        customized: false,
+      };
+      stagedRoutingPreset = routingState.routingPreset;
+      routingResetArmed = false;
+    } else if (routingResetArmed && window.mush && typeof window.mush.resetProfileRoutingRules === 'function') {
       await window.mush.resetProfileRoutingRules();
       routingResetArmed = false;
       routingState = { ...routingState, customized: false };
@@ -406,6 +462,17 @@ if (antiIdleEl) {
 if (resetRoutingBtn) {
   resetRoutingBtn.addEventListener('click', () => {
     routingResetArmed = true;
+    renderRouting();
+  });
+}
+
+if (serverTypeEl) {
+  serverTypeEl.addEventListener('change', () => {
+    stagedRoutingPreset = serverTypeEl.value === 'evennia' ? 'evennia' : 'mush';
+    // A pending reset becomes moot the moment a switch is staged (see
+    // renderRouting's comment), so drop it rather than leave it armed but
+    // unreachable behind a disabled button.
+    routingResetArmed = false;
     renderRouting();
   });
 }

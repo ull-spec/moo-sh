@@ -148,7 +148,8 @@ body {
 #nw-name,
 #nw-host,
 #nw-port,
-#nw-charset {
+#nw-charset,
+#nw-server-type {
   width: 100%;
   background: var(--input-bg);
   color: var(--fg);
@@ -170,7 +171,8 @@ body {
 #nw-name:focus,
 #nw-host:focus,
 #nw-port:focus,
-#nw-charset:focus {
+#nw-charset:focus,
+#nw-server-type:focus {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }

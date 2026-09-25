@@ -9,13 +9,14 @@
  * wiring anything live" step from the build plan.
  *
  * Usage:
- *   node test/routing-dryrun.js [logFile] [--rules=family] [--aliases=<profileId>]
+ *   node test/routing-dryrun.js [logFile] [--rules=family|evennia] [--aliases=<profileId>]
  *
  * Defaults: newest *.log across both the app's userData captures dir
  * (~/.config/<app name>/captures, matching capturesDir() in src/main/index.js)
  * and the legacy in-repo captures/ dir, plus the familyRules preset and no
- * channel aliases. This script is a standalone Node CLI (no Electron `app`
- * module), so it replicates the userData path by hand instead of calling
+ * channel aliases. --rules=evennia swaps in presets.evenniaRules instead.
+ * This script is a standalone Node CLI (no Electron `app` module), so it
+ * replicates the userData path by hand instead of calling
  * app.getPath('userData'). With --aliases=<profileId> it loads channelAliases
  * from the profile JSON, checking the userData profiles dir first and the
  * legacy repo config/profiles/ dir last.
@@ -40,14 +41,20 @@ const LEGACY_PROFILES_DIR = path.join(ROOT, 'config', 'profiles');
 const args = process.argv.slice(2);
 let logFile = null;
 let aliasesProfile = null;
+let rulesPreset = 'family';
 for (const a of args) {
   if (a.startsWith('--aliases=')) aliasesProfile = a.slice('--aliases='.length);
-  else if (a.startsWith('--rules=')) {
-    // reserved for future preset selection; only 'family' exists today
-  } else if (!a.startsWith('--')) {
+  else if (a.startsWith('--rules=')) rulesPreset = a.slice('--rules='.length);
+  else if (!a.startsWith('--')) {
     logFile = a;
   }
 }
+
+if (rulesPreset !== 'family' && rulesPreset !== 'evennia') {
+  console.error(`Unknown --rules value: ${rulesPreset} (expected "family" or "evennia")`);
+  process.exit(2);
+}
+const selectedRules = rulesPreset === 'evennia' ? presets.evenniaRules : presets.familyRules;
 
 function listLogs(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -114,7 +121,7 @@ function outPayload(logLine) {
 }
 
 // --- run -------------------------------------------------------------------
-const router = createRouter(presets.familyRules, { channelAliases });
+const router = createRouter(selectedRules, { channelAliases });
 
 const raw = fs.readFileSync(logFile, 'utf8').split(/\r?\n/);
 const byRole = { feed: 0, channel: 0, page: 0 };
@@ -150,7 +157,11 @@ for (const logLine of raw) {
 // --- report ----------------------------------------------------------------
 console.log('Routing dry-run');
 console.log('  log     :', path.relative(ROOT, logFile));
-console.log('  rules   : familyRules (', presets.familyRules.length, 'rules )');
+console.log(
+  '  rules   :',
+  rulesPreset === 'evennia' ? 'evenniaRules' : 'familyRules',
+  '(', selectedRules.length, 'rules )'
+);
 console.log('  aliases :', aliasesProfile ? `${aliasesProfile} -> ${JSON.stringify(channelAliases)}` : '(none)');
 console.log('');
 console.log(`OUT lines processed: ${outTotal}`);

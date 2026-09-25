@@ -148,16 +148,29 @@ function loadProfile(profilesDir, id) {
   parsed.__sourceFile = file;
   normalizeLogins(parsed);
 
+  // Which routing preset this world uses (the MUSH family, or Evennia).
+  // Anything other than the exact stored string 'evennia' normalizes to
+  // 'mush', including garbage a hand-edit might have left behind — and when
+  // that happens the bad value is dropped from the in-memory profile rather
+  // than round-tripped, the same "never persist garbage" discipline the color
+  // field below already follows. The key itself is never written here; an
+  // absent field stays absent until something actually opts the world into
+  // Evennia (see createProfile/setRoutingPreset).
+  const preset = routingLegacy.normalizePresetId(parsed.routingPreset);
+  if (parsed.routingPreset !== undefined && parsed.routingPreset !== 'mush' && parsed.routingPreset !== 'evennia') {
+    delete parsed.routingPreset;
+  }
+
   // Profiles written before the Phase 2 routing feature have no routingRules
   // field at all; default them (in memory only — like normalizeLogins, nothing
-  // is written back to disk here) to the generic family preset so page/channel
+  // is written back to disk here) to the world's own preset so page/channel
   // routing works out of the box. An explicit `routingRules: []` is a
   // deliberate per-world opt-out and is respected, so only a genuinely
   // absent/non-array field is defaulted. Deep-cloned so a caller mutating one
   // profile's rules can never corrupt the shared preset module.
   if (!Array.isArray(parsed.routingRules)) {
-    parsed.routingRules = routingLegacy.currentRulesClone();
-    parsed.routingRulesVersion = routingLegacy.ROUTING_RULES_VERSION;
+    parsed.routingRules = routingLegacy.currentRulesClone(preset);
+    parsed.routingRulesVersion = routingLegacy.rulesVersion(preset);
   }
 
   // ...but a profile that already HAS routingRules used to be frozen forever:
@@ -168,22 +181,27 @@ function loadProfile(profilesDir, id) {
   // in this loader — nothing is written to disk until some other operation
   // persists the profile anyway.
   //
-  // Only rules that are a VERBATIM copy of an older preset are replaced: those
-  // were written by this app (createProfile, or the backfill above), so there
-  // is nothing of the user's in them to lose. Rules that match no preset
-  // generation have been hand-edited and are left exactly as they are —
-  // flagged with a runtime-only marker instead, so the Settings window can
-  // offer an explicit, user-driven reset (see resetRoutingRules). The version
-  // stamp short-circuits the comparison on every subsequent load.
-  else if (parsed.routingRulesVersion !== routingLegacy.ROUTING_RULES_VERSION) {
-    if (routingLegacy.isLegacyStock(parsed.routingRules)) {
-      parsed.routingRules = routingLegacy.currentRulesClone();
-      parsed.routingRulesVersion = routingLegacy.ROUTING_RULES_VERSION;
-    } else if (routingLegacy.isCurrentStock(parsed.routingRules)) {
-      parsed.routingRulesVersion = routingLegacy.ROUTING_RULES_VERSION;
+  // Only rules that are a VERBATIM copy of an older generation of THIS
+  // profile's own preset are replaced: those were written by this app
+  // (createProfile, or the backfill above), so there is nothing of the user's
+  // in them to lose. An evennia profile is only ever compared against evennia
+  // history, never against familyRules, so a MUSH-family rule set living on an
+  // Evennia world (however it got there) reads as customized rather than
+  // being silently overwritten with unrelated defaults. Rules that match no
+  // generation of the profile's own preset have been hand-edited and are left
+  // exactly as they are — flagged with a runtime-only marker instead, so the
+  // Settings window can offer an explicit, user-driven reset (see
+  // resetRoutingRules). The version stamp short-circuits the comparison on
+  // every subsequent load.
+  else if (parsed.routingRulesVersion !== routingLegacy.rulesVersion(preset)) {
+    if (routingLegacy.isLegacyStock(parsed.routingRules, preset)) {
+      parsed.routingRules = routingLegacy.currentRulesClone(preset);
+      parsed.routingRulesVersion = routingLegacy.rulesVersion(preset);
+    } else if (routingLegacy.isCurrentStock(parsed.routingRules, preset)) {
+      parsed.routingRulesVersion = routingLegacy.rulesVersion(preset);
     }
   }
-  parsed.__routingCustomized = routingLegacy.isCustomized(parsed.routingRules);
+  parsed.__routingCustomized = routingLegacy.isCustomized(parsed.routingRules, preset);
 
   // Who "you" are, for the router's group-page self-name stripping: a group
   // page's incoming recipient list includes you, its outgoing echo doesn't, and
@@ -267,6 +285,7 @@ function discoverProfiles(profilesDir) {
       tls: !!p.tls,
       color: p.color || null,
       logins: p.logins,
+      routingPreset: routingLegacy.normalizePresetId(p.routingPreset),
     });
   }
 
@@ -338,17 +357,48 @@ function setColor(profilesDir, id, hexOrNull) {
 }
 
 // Explicit, user-driven reset of a profile's routing rules to the current
-// preset. Same write-through pattern as setAntiIdle/setColor, and deliberately
-// the ONLY way a hand-edited rule set is ever replaced — loadProfile's
-// migration refuses to touch those on its own (see its comment). Writes just
-// the routingRules + version keys; every other field the profile carries
-// (poseLogMarkers, sounds, capture, channelAliases, autoConnect, colour, ...)
-// is round-tripped untouched, because `merged` is the whole loaded profile.
+// preset — the world's OWN preset (routingPreset, absent meaning 'mush'), not
+// necessarily the MUSH family one. Same write-through pattern as
+// setAntiIdle/setColor, and deliberately the ONLY way a hand-edited rule set
+// is ever replaced — loadProfile's migration refuses to touch those on its
+// own (see its comment). Writes just the routingRules + version keys; every
+// other field the profile carries (poseLogMarkers, sounds, capture,
+// channelAliases, autoConnect, colour, ...) is round-tripped untouched,
+// because `merged` is the whole loaded profile.
 function resetRoutingRules(profilesDir, id) {
   const merged = loadProfile(profilesDir, id);
+  const preset = routingLegacy.normalizePresetId(merged.routingPreset);
   stripRuntimeFields(merged);
-  merged.routingRules = routingLegacy.currentRulesClone();
-  merged.routingRulesVersion = routingLegacy.ROUTING_RULES_VERSION;
+  merged.routingRules = routingLegacy.currentRulesClone(preset);
+  merged.routingRulesVersion = routingLegacy.rulesVersion(preset);
+
+  const realFile = path.join(profilesDir, `${id}.json`);
+  fs.writeFileSync(realFile, JSON.stringify(merged, null, 2) + '\n', 'utf8');
+  return merged;
+}
+
+// Switch a world between the MUSH-family and Evennia routing presets. Same
+// write-through pattern as everything else in this section: load, strip the
+// runtime-only fields, mutate, write the real file, return the merged result.
+// Unlike resetRoutingRules (which restores the CURRENT preset's rules), this
+// also changes WHICH preset a world uses, so a hand-edited rule set is always
+// replaced here — switching families means the old rules are for the wrong
+// server entirely, there is nothing worth preserving. 'evennia' is stored
+// explicitly; 'mush' is represented by the key's absence, same as every other
+// absent-means-default field in this store, so a plain MUSH-family world's
+// file never grows a key it didn't need before this feature existed.
+function setRoutingPreset(profilesDir, id, preset) {
+  const merged = loadProfile(profilesDir, id);
+  const normalized = routingLegacy.normalizePresetId(preset);
+  stripRuntimeFields(merged);
+
+  if (normalized === 'evennia') {
+    merged.routingPreset = 'evennia';
+  } else {
+    delete merged.routingPreset;
+  }
+  merged.routingRules = routingLegacy.currentRulesClone(normalized);
+  merged.routingRulesVersion = routingLegacy.rulesVersion(normalized);
 
   const realFile = path.join(profilesDir, `${id}.json`);
   fs.writeFileSync(realFile, JSON.stringify(merged, null, 2) + '\n', 'utf8');
@@ -387,13 +437,15 @@ function slugify(name) {
 // appending -2, -3, ... The file is written with the new logins[] shape so it
 // round-trips cleanly through loadProfile/normalizeLogins with no special case.
 //
-// Seeded with the generic family routingRules preset (channels/pages/notices)
-// so a brand-new world gets working tab routing immediately, without the user
-// hand-editing profile JSON first — the preset's channel rule matches both the
-// `[Name]` (PennMUSH/TinyMUSH/TinyMUX) and `<Name>` (RhostMUSH) tag styles.
-function createProfile(profilesDir, { name, host, port, charset, tls, tlsAllowInsecure, color } = {}) {
+// Seeded with the new world's chosen routingPreset (channels/pages/notices for
+// the MUSH family, or Evennia's own set) so a brand-new world gets working tab
+// routing immediately, without the user hand-editing profile JSON first — the
+// MUSH preset's channel rule matches both the `[Name]` (PennMUSH/TinyMUSH/
+// TinyMUX) and `<Name>` (RhostMUSH) tag styles.
+function createProfile(profilesDir, { name, host, port, charset, tls, tlsAllowInsecure, color, routingPreset } = {}) {
   const displayName = String(name == null ? '' : name).trim();
   const base = slugify(displayName);
+  const preset = routingLegacy.normalizePresetId(routingPreset);
 
   const taken = new Set(discoverProfiles(profilesDir).map((p) => p.id));
   let id = base;
@@ -413,10 +465,16 @@ function createProfile(profilesDir, { name, host, port, charset, tls, tlsAllowIn
     tlsAllowInsecure: !!tlsAllowInsecure,
     logins: [{ name: 'Default', autoLoginCommand: '' }],
     channelAliases: {},
-    routingRules: routingLegacy.currentRulesClone(),
+    // 'mush' is the default and is represented by the key's absence (same
+    // discipline as every other absent-means-default field here), so a plain
+    // MUSH-family world's file never grows a key it didn't need before this
+    // feature existed — and the pre-existing exact-key-set test for a default
+    // new world keeps passing unchanged.
+    ...(preset === 'evennia' ? { routingPreset: 'evennia' } : {}),
+    routingRules: routingLegacy.currentRulesClone(preset),
     // Stamped so loadProfile's migration can short-circuit on an integer
     // compare instead of re-serializing the whole rule set on every load.
-    routingRulesVersion: routingLegacy.ROUTING_RULES_VERSION,
+    routingRulesVersion: routingLegacy.rulesVersion(preset),
     // selfNames is deliberately NOT written here. A brand-new world has no
     // login command yet (connect:go persists that immediately afterwards), so
     // there is nothing to infer from at this moment; leaving the key absent
@@ -473,6 +531,7 @@ module.exports = {
   setAntiIdle,
   setColor,
   resetRoutingRules,
+  setRoutingPreset,
   setSelfNames,
   slugify,
   createProfile,

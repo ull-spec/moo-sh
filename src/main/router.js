@@ -13,7 +13,7 @@
  *   {
  *     pattern: RegExp | string,   // string is compiled with `flags`
  *     flags:   string,            // optional, only used when pattern is a string
- *     target:  { role, name?, nameFrom? },
+ *     target:  { role, name?, nameFrom?, combineFrom?, namePrefix? },
  *     notify:  one of EVENTS | null
  *   }
  *   - role     : one of ROLES (feed | channel | page).
@@ -34,6 +34,13 @@
  *                own name (options.selfNames) is dropped from the set, so the
  *                incoming and outgoing sides of one group page agree.
  *                Takes precedence over nameFrom when both are present.
+ *   - namePrefix : an optional static string prepended to the derived name,
+ *                after nameFrom/combineFrom resolution and after channel
+ *                alias resolution, before the window key is computed. Lets a
+ *                preset split what would otherwise be the same target name
+ *                into separate windows — e.g. Evennia's texts use this to
+ *                keep "Text: Alice" apart from a page conversation with the
+ *                same person rather than sharing its tab.
  *
  * For channel targets the derived/static name is passed through the profile's
  * channelAliases map (see common/channels.resolveChannelName) so different
@@ -215,6 +222,9 @@ function createRouter(rules, options = {}) {
           : deriveName(t, match);
       if (role === ROLES.CHANNEL && name != null) {
         name = resolveChannelName(name, channelAliases);
+      }
+      if (name != null && typeof t.namePrefix === 'string' && t.namePrefix !== '') {
+        name = (t.namePrefix + name).slice(0, MAX_NAME_LEN);
       }
       const key = name != null ? normalizeTarget(name) : null;
 

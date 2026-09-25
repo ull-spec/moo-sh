@@ -56,6 +56,7 @@ const nwNameEl = document.getElementById('nw-name');
 const nwHostEl = document.getElementById('nw-host');
 const nwPortEl = document.getElementById('nw-port');
 const nwCharsetEl = document.getElementById('nw-charset');
+const nwServerTypeEl = document.getElementById('nw-server-type');
 const nwTlsEl = document.getElementById('nw-tls');
 const nwTlsInsecureEl = document.getElementById('nw-tls-insecure');
 const nwTlsInsecureFieldEl = document.getElementById('nw-tls-insecure-field');
@@ -236,8 +237,13 @@ function selectProfile(id) {
     // next new world — but only clear it when the form is genuinely being
     // opened. The name/host/port inputs are plain DOM and survive a
     // re-selection untouched, so silently wiping just the color would be
-    // both inconsistent and invisible to the user.
-    if (!wasNewWorld) newWorldColor = null;
+    // both inconsistent and invisible to the user. Server type gets the same
+    // treatment: it's a plain <select> that would otherwise keep showing
+    // whatever the last abandoned new-world form left it on.
+    if (!wasNewWorld) {
+      newWorldColor = null;
+      if (nwServerTypeEl) nwServerTypeEl.value = 'mush';
+    }
     markSelected(nwColorSwatchesEl, newWorldColor);
     updateNewWorldValidity();
     nwNameEl.focus();
@@ -457,6 +463,7 @@ function doConnect() {
     const host = nwHostEl.value.trim();
     const port = nwPortEl.value.trim();
     const charset = nwCharsetEl.value || 'utf8';
+    const routingPreset = nwServerTypeEl && nwServerTypeEl.value === 'evennia' ? 'evennia' : 'mush';
     const useTls = !!(nwTlsEl && nwTlsEl.checked);
     const tlsAllowInsecure = useTls && !!(nwTlsInsecureEl && nwTlsInsecureEl.checked);
     if (!host || !port) {
@@ -465,7 +472,16 @@ function doConnect() {
     }
     if (window.mush && typeof window.mush.connectGo === 'function') {
       window.mush.connectGo({
-        newWorld: { name, host, port: Number(port), charset, tls: useTls, tlsAllowInsecure, color: newWorldColor },
+        newWorld: {
+          name,
+          host,
+          port: Number(port),
+          charset,
+          tls: useTls,
+          tlsAllowInsecure,
+          color: newWorldColor,
+          routingPreset,
+        },
         loginName: 'Default',
         autoLoginCommand: '',
       });
